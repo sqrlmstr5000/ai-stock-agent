@@ -390,7 +390,7 @@ class StockAdvisor:
 
     def analyze_stock(self, symbol: str) -> Dict:
         """Run complete stock analysis"""
-        print(f"\nAnalyzing {symbol}...")
+        logging.info(f"Analyzing {symbol}...")
 
         # Initialize state
         init_sate: State = {
@@ -403,26 +403,37 @@ class StockAdvisor:
         final_state = self.graph.invoke(init_sate)
         return final_state["results"]
 
-    def print_report(self, symbol: str, results: Dict, usage_stats: Dict):
-        """Prints a formatted stock analysis report."""
-        print(f"\n=== Stock Analysis Report for {symbol} ===")
-        print("\n--- Technical Analysis ---")
-        print(results.get("technical", {}).get("analysis", "N/A"))
-        print("\n--- Market Analysis ---")
-        print(results.get("market", {}).get("analysis", "N/A"))
-        print("\n--- News Analysis ---")
-        print(results.get("news", {}).get("analysis", "N/A"))
-        print("\n--- Final Recommendation ---")
-        print(results.get("recommendation", "N/A"))
+    def get_report_str(self, symbol: str, results: Dict) -> str:
+        """Creates a formatted stock analysis report as a single string."""
+        report = []
+        report.append(f"\n=== Stock Analysis Report for {symbol} ===")
+        report.append("\n--- Technical Analysis ---")
+        report.append(results.get("technical", {}).get("analysis", "N/A"))
+        report.append("\n--- Market Analysis ---")
+        report.append(results.get("market", {}).get("analysis", "N/A"))
+        report.append("\n--- News Analysis ---")
+        report.append(results.get("news", {}).get("analysis", "N/A"))
+        report.append("\n--- Final Recommendation ---")
+        report.append(results.get("recommendation", "N/A"))
+        return "\n".join(report)
 
-    def compare_stocks(self, symbols: List[str]) -> str:
+    def save_report(self, file_basename: str, data: str):
+        """Saves the analysis report to a file."""
+        today = datetime.now().strftime("%m-%d-%Y")
+        filename = f"output/OUTPUT-{file_basename}-{today}.md"
+        with open(filename, 'w') as f:
+            f.write(data)
+        logging.info(f"Report saved to {filename}")
+
+    def compare_stocks(self, symbols: List[str]) -> Dict:
         """Compare multiple stocks and recommend the best one"""
-        print(f"\nComparing {', '.join(symbols)}...")
+        logging.info(f"Comparing {', '.join(symbols)}...")
         analyses = {}
         for symbol in symbols:
             results = self.analyze_stock(symbol)
             analyses[symbol] = results
-            self.print_report(symbol, results, token_usage_stats)
+            results_str = self.get_report_str(symbol, results)
+            print(results_str)
 
         prompt = PromptTemplate.from_template(
             """Given the following stock analyses:
@@ -436,15 +447,22 @@ class StockAdvisor:
         chain = prompt | self.llm
         comparison = chain.invoke({"analyses": json.dumps(analyses, indent=2)})
         update_token_usage("comparison", comparison.usage_metadata)
-        return comparison.content
+
+        comparison_result = {
+            "comparison": comparison.content,
+            "token_usage": token_usage_stats
+        }
+        return comparison_result
 
 def main(symbols: List[str], div_only: bool, news_only: bool, market_only: bool, tech_only: bool):
     """Run stock analysis and print results"""
     if len(symbols) > 1:
         advisor = StockAdvisor()
         comparison = advisor.compare_stocks(symbols)
-        print("\n=== Stock Comparison Result ===")
-        print(comparison)
+        comparison_str = "\n=== Stock Comparison Result ==="
+        comparison_str += comparison["comparison"]
+        print(comparison_str)
+        advisor.save_report('-'.join(symbols), comparison_str)
         print("\n--- Token Usage Statistics ---")
         print(json.dumps(token_usage_stats, indent=2))
     elif news_only:
@@ -459,7 +477,9 @@ def main(symbols: List[str], div_only: bool, news_only: bool, market_only: bool,
     else:
         advisor = StockAdvisor()
         results = advisor.analyze_stock(symbols[0])
-        advisor.print_report(symbols[0], results, token_usage_stats)
+        results_str = advisor.get_report_str(symbols[0], results)
+        print(results_str)
+        advisor.save_report(symbols[0], results_str)
         print("\n--- Token Usage Statistics ---")
         print(json.dumps(token_usage_stats, indent=2))
 
