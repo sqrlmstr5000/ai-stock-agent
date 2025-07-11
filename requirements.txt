@@ -1,0 +1,4 @@
+langchain
+langgraph
+yfinance
+langchain-google-genai
