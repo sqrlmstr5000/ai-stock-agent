@@ -221,25 +221,25 @@ def market_analysis(state: State) -> State:
         3. Risk assessment
         4. Market outlook
         5. Earnings and Revenue Growth: Use the Income Statement History to analyze the following metrics over time.
-            a. Total Revenue / Operating Revenue: These represent the top line of a company's income statement and indicate the company's ability to generate sales from its primary operations. Consistent growth in revenue is a fundamental indicator of a healthy and expanding business.
-            b. Gross Profit: This shows the profit a company makes after deducting the costs associated with producing its goods or services. It's a key indicator of a company's efficiency in managing its production costs and pricing strategy.
-            c. Operating Income / Total Operating Income As Reported: This metric reflects the profit generated from a company's core operations before deducting interest and taxes. It's crucial for understanding the operational efficiency and profitability of the business itself, separate from financing or tax strategies.
-            d. Net Income / Net Income Common Stockholders / Net Income From Continuing Operations: These are often considered the "bottom line" and represent the total profit of a company after all expenses, including taxes and interest, have been deducted. It's a comprehensive measure of profitability and what's available to shareholders.
-            e. Diluted EPS (Earnings Per Share) / Basic EPS: EPS is a crucial metric for investors, as it indicates how much profit a company makes per outstanding share of stock. Tracking EPS over time reveals the company's ability to generate profits for its shareholders, even as the number of shares may change due to factors like stock options or conversions.
+            Total Revenue / Operating Revenue: These represent the top line of a company's income statement and indicate the company's ability to generate sales from its primary operations. Consistent growth in revenue is a fundamental indicator of a healthy and expanding business.
+            Gross Profit: This shows the profit a company makes after deducting the costs associated with producing its goods or services. It's a key indicator of a company's efficiency in managing its production costs and pricing strategy.
+            Operating Income / Total Operating Income As Reported: This metric reflects the profit generated from a company's core operations before deducting interest and taxes. It's crucial for understanding the operational efficiency and profitability of the business itself, separate from financing or tax strategies.
+            Net Income / Net Income Common Stockholders / Net Income From Continuing Operations: These are often considered the "bottom line" and represent the total profit of a company after all expenses, including taxes and interest, have been deducted. It's a comprehensive measure of profitability and what's available to shareholders.
+            Diluted EPS (Earnings Per Share) / Basic EPS: EPS is a crucial metric for investors, as it indicates how much profit a company makes per outstanding share of stock. Tracking EPS over time reveals the company's ability to generate profits for its shareholders, even as the number of shares may change due to factors like stock options or conversions.
         6. Profitability Ratios:
-            a. Net Profit Margin: How much profit does the company make for every dollar of revenue? A higher and consistent margin is desirable.
-            b. Return on Equity (ROE): Measures how efficiently a company is using shareholder investments to generate profits. A healthy ROE (often 10-20% or higher, depending on the industry) indicates good management of shareholder capital.
-            c. Return on Assets (ROA): Shows how efficiently a company is using its assets to generate earnings.
+            Net Profit Margin: How much profit does the company make for every dollar of revenue? A higher and consistent margin is desirable.
+            Return on Equity (ROE): Measures how efficiently a company is using shareholder investments to generate profits. A healthy ROE (often 10-20% or higher, depending on the industry) indicates good management of shareholder capital.
+            Return on Assets (ROA): Shows how efficiently a company is using its assets to generate earnings.
         7. Valuation Ratios:
-            a. Price-to-Earnings (P/E) Ratio: Compares the stock price to its earnings per share. A high P/E might suggest overvaluation or high growth expectations, while a low P/E could indicate undervaluation or challenges. Compare it to industry peers and historical averages.
-            c. PEG Ratio (Price/Earnings-to-Growth): This ratio takes into account the company's earnings growth, making it useful for evaluating growth stocks. A PEG ratio of 1 or less is generally considered favorable.
+            Price-to-Earnings (P/E) Ratio: Compares the stock price to its earnings per share. A high P/E might suggest overvaluation or high growth expectations, while a low P/E could indicate undervaluation or challenges. Compare it to industry peers and historical averages.
+            PEG Ratio (Price/Earnings-to-Growth): This ratio takes into account the company's earnings growth, making it useful for evaluating growth stocks. A PEG ratio of 1 or less is generally considered favorable.
         8. Financial Health and Debt:
-            a. Debt-to-Equity (D/E) Ratio: Indicates the proportion of debt a company uses to finance its assets relative to shareholder equity. A lower D/E ratio (e.g., 1 or lower) suggests less financial risk.
-            b. Free Cash Flow (FCF): The cash a company generates after covering its operating expenses and capital expenditures. Strong and increasing FCF indicates a company's ability to fund growth, pay dividends, or buy back shares.
+            Debt-to-Equity (D/E) Ratio: Indicates the proportion of debt a company uses to finance its assets relative to shareholder equity. A lower D/E ratio (e.g., 1 or lower) suggests less financial risk.
+            Free Cash Flow (FCF): The cash a company generates after covering its operating expenses and capital expenditures. Strong and increasing FCF indicates a company's ability to fund growth, pay dividends, or buy back shares.
         9. Dividend Analysis (if applicable):
-            a. Dividend Yield: The annual dividend payment as a percentage of the stock price.
-            b. Dividend Payout Ratio: The percentage of earnings paid out as dividends. A sustainable payout ratio (e.g., below 60-70%) is important.
-            c. Dividend Growth History: A consistent history of increasing dividends can indicate financial strength and commitment to shareholders.
+            Dividend Yield: The annual dividend payment as a percentage of the stock price.
+            Dividend Payout Ratio: The percentage of earnings paid out as dividends. A sustainable payout ratio (e.g., below 60-70%) is important.
+            Dividend Growth History: A consistent history of increasing dividends can indicate financial strength and commitment to shareholders.
         """
     )
 
@@ -434,6 +434,7 @@ class StockAdvisor:
             analyses[symbol] = results
             results_str = self.get_report_str(symbol, results)
             print(results_str)
+            self.save_report(symbol, results_str)
 
         prompt = PromptTemplate.from_template(
             """Given the following stock analyses:
