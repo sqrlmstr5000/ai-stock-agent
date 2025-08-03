@@ -1,5 +1,7 @@
 # App
 output/*.md
+*.env
+/config
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

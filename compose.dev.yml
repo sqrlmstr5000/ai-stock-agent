@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  sa:
+    container_name: sa
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"  # Vue.js dev server
+      - "8066:8000"  # FastAPI server
+    environment:
+      - WATCHFILES_FORCE_POLLING=true
+      - VITE_API_URL=http://192.168.0.137:8066
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      - FRED_API_KEY=${FRED_API_KEY}
+      - DEBUG=1  # Enable debug logging
+      - PYTHONUNBUFFERED=1  # Force Python to use unbuffered output
+      - PYTHONDONTWRITEBYTECODE=1  # Don't write .pyc files
+
+    volumes:
+      - ./client/src:/app/client/src  # Vue.js source code
+      - ./server/src:/app/server/src  # FastAPI source code
+      - ./client/index.html:/app/client/index.html  # Vue entry point
+      - ./client/vite.config.js:/app/client/vite.config.js  # Vite config
+      - ./config:/config  # Persistent database storage
+    command: ["/app/start-dev.sh"]

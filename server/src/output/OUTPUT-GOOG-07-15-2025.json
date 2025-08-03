@@ -1,0 +1,21 @@
+{
+  "report_date": "2025-07-15",
+  "ticker": "GOOG",
+  "pe_ratio": 20.66,
+  "revenue_growth_yoy": null,
+  "eps_growth_yoy": -71.8,
+  "net_profit_margin": 0.30857,
+  "free_cash_flow": 60679000064.0,
+  "debt_to_equity_ratio": 8.254,
+  "close_price": 185.12,
+  "volume": null,
+  "sma_20": 176.39,
+  "sma_50": 171.65,
+  "sma_200": 174.57,
+  "rsi": 78.14,
+  "news_sentiment_score": 85.0,
+  "analyst_consensus_rating": "Buy",
+  "guidance_summary": "No specific guidance provided",
+  "low_price_target": 195.0,
+  "high_price_target": 220.0
+}

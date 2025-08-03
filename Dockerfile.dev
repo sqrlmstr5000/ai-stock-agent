@@ -1,0 +1,46 @@
+# Use an official Python base image
+FROM python:3.12-slim
+
+# Install Node.js and npm
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Create config directory
+RUN mkdir -p /config
+
+# Copy Python requirements and install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install uvicorn[standard] watchfiles
+
+# Copy package.json and install Node dependencies
+COPY client/package*.json client/
+RUN cd client && npm install
+
+# Copy the rest of the application
+COPY . .
+
+# Set environment variables
+ENV PYTHONPATH=/app
+
+# Create a shell script to run both servers
+RUN echo '#!/bin/bash\n\
+cd /app/client && npm run dev & \n\
+cd /app/server/src && uvicorn main:app --reload --host 0.0.0.0 --port 8000\n\
+wait' > /app/start-dev.sh
+
+RUN chmod +x /app/start-dev.sh
+
+# Expose ports for both services
+EXPOSE 5173 8000
+
+# Start both servers
+CMD ["/app/start-dev.sh"]

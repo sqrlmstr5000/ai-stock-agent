@@ -95,3 +95,4 @@ The stock analysis is performed by a series of agents, each with a specific role
 This project was inspired by and adapted from the following notebook:
 
 - [https://github.com/2manoj1/g-colab/blob/main/deepseek_AI_Agent.ipynb](https://github.com/2manoj1/g-colab/blob/main/deepseek_AI_Agent.ipynb)
+

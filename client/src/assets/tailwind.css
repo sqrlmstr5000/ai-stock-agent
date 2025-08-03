@@ -1,0 +1,31 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply h-full bg-gray-100;
+  }
+  body {
+    @apply h-full;
+  }
+  #app {
+    @apply h-full;
+  }
+}
+
+@layer components {
+  .nav-link {
+    @apply flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold hover:bg-gray-50 hover:text-primary-600 transition-colors duration-150;
+  }
+  .nav-link.active {
+    @apply bg-gray-50 text-primary-600;
+  }
+  .btn-primary {
+    @apply rounded-md bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600;
+  }
+  .btn-secondary {
+    @apply rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50;
+  }
+}

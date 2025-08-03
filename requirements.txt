@@ -2,3 +2,9 @@ langchain
 langgraph
 yfinance
 langchain-google-genai
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.4.2
+peewee>=3.17.0
+playhouse>=0.1.0
+apscheduler

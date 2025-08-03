@@ -1,0 +1,20 @@
+{
+  "report_date": "2024-08-08",
+  "ticker": "WPC",
+  "pe_ratio": 31.997,
+  "revenue_growth_yoy": -9.09,
+  "eps_growth_yoy": -76.07,
+  "net_profit_margin": 0.26782,
+  "free_cash_flow": 1033327104.0,
+  "debt_to_equity_ratio": 94.044,
+  "close_price": 62.075,
+  "volume": null,
+  "sma_20": 62.586,
+  "sma_50": 61.637,
+  "sma_200": 57.834,
+  "rsi": 41.4,
+  "news_sentiment_score": 70.0,
+  "analyst_consensus_rating": "Hold",
+  "low_price_target": 55.0,
+  "high_price_target": 65.0
+}
