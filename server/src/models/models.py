@@ -76,7 +76,8 @@ class Research(BaseModel):
     """Research table to store analysis results for each stock"""
     stock = ForeignKeyField(Stock, backref='research_entries')
     market = TextField(null=True)     # Market data analysis
-    news = TextField(null=True)       # News analysis
+    news = TextField(null=True)       # News 
+    technical = TextField(null=True)  # Technical analysis
     dividend = TextField(null=True)   # Dividend analysis
     recommendation = TextField(null=True)  # Overall recommendation
     structured_output = JSONField(null=True)  # Structured data in JSON format
@@ -152,8 +153,9 @@ class HistoricalValues(BaseModel):
 class PortfolioResearch(BaseModel):
     """Table to store portfolio-level research and recommendations"""
     report_date = DateField(default=datetime.now)
-    dca_analysis = TextField(null=True)  # DCA recommendations/analysis
-    portfolio_analysis = TextField(null=True)  # Portfolio optimization/analysis
+    dca_analysis = TextField(null=True) 
+    economic_analysis = TextField(null=True)  
+    portfolio_analysis = TextField(null=True)  
     notes = TextField(null=True)  # Optional notes or summary
 
     class Meta:

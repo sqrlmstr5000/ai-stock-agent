@@ -53,6 +53,10 @@ export default {
     symbol: {
       type: String,
       required: true
+    },
+    reportId: {
+      type: [String, Number],
+      required: false
     }
   },
   data() {
@@ -71,6 +75,29 @@ export default {
         return this.md.render(this.selectedReport);
       }
       return '';
+    }
+  },
+  watch: {
+    // Watch for changes to symbol or reportId
+    symbol: {
+      immediate: true,
+      handler(newSymbol) {
+        if (newSymbol) {
+          this.fetchResearchHistory()
+          this.fetchTechnicalHistory()
+        }
+      }
+    },
+    reportId: {
+      immediate: true,
+      handler(newReportId) {
+        if (newReportId && this.researchHistory.length > 0) {
+          const found = this.researchHistory.find(r => String(r.id) === String(newReportId))
+          if (found) {
+            this.selectResearch(found)
+          }
+        }
+      }
     }
   },
   methods: {
@@ -114,7 +141,14 @@ export default {
         const response = await axios.get(`/api/stock/${this.symbol}/research`);
         this.researchHistory = response.data.data;
         console.log('Research history:', this.researchHistory);
-        
+        // If reportId is set, auto-select that report
+        if (this.reportId && this.researchHistory.length > 0) {
+          const found = this.researchHistory.find(r => String(r.id) === String(this.reportId))
+          if (found) {
+            await this.selectResearch(found)
+            return
+          }
+        }
         // Auto-select first report if available
         if (this.researchHistory.length > 0) {
           await this.selectResearch(this.researchHistory[0]);
@@ -129,10 +163,6 @@ export default {
         const response = await axios.get(`/api/stock/${this.symbol}/technical`);
         this.technicalHistory = response.data.data;
         console.log('Technical history:', this.technicalHistory);
-        // Auto-select first technical report if available
-        if (this.technicalHistory.length > 0) {
-          await this.selectTechnical(this.technicalHistory[0]);
-        }
       } catch (error) {
         console.error('Error fetching technical history:', error);
       }

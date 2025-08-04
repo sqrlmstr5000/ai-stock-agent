@@ -17,6 +17,7 @@ class State(TypedDict):
     yfinance_provider: any
     results: Dict
     usage: Dict[str, dict]
+    period: str  # Added period to the state
 
 class TechnicalAnalysisGraph:
     def __init__(self, llm):
@@ -29,11 +30,25 @@ class TechnicalAnalysisGraph:
         self.logger.info(f"Starting technical analysis for {symbol}...")
         llm = state["llm"]
         provider = state["yfinance_provider"]
+        period = state.get("period", "1d")
 
-        data = provider.get_technical_indicators()
+        data = provider.get_technical_indicators(period=period)
+        if data is None:
+            self.logger.error(f"No technical indicator data available for {symbol} with period '{period}'. Stopping graph execution.")
+            state["results"]["technical"] = {
+                "data": None,
+                "analysis": "No technical indicator data available. Analysis aborted."
+            }
+            state["usage"] = {
+                "technical_analysis": {
+                    "token_usage": None,
+                    "api_usage": None
+                }
+            }
+            return state
 
         prompt = PromptTemplate.from_template(
-            """Analyze these technical indicators for {symbol}:
+            """Analyze these technical indicators for {symbol} over the last {period}:
             {data}
 
             Provide:
@@ -45,9 +60,13 @@ class TechnicalAnalysisGraph:
         )
 
         chain = prompt | llm
-        analysis = await chain.ainvoke({"symbol": symbol, "data": json.dumps(data.model_dump(), indent=2)})
+        analysis = await chain.ainvoke({
+            "symbol": symbol, 
+            "data": json.dumps(data.model_dump(), indent=2), 
+            "period": period
+        })
 
-        state["results"] = {
+        state["results"]["technical"] = {
             "data": data.model_dump(),
             "analysis": analysis.content
         }
@@ -59,45 +78,15 @@ class TechnicalAnalysisGraph:
         }
         return state
     
-    async def export_analysis(self, state: dict) -> dict:
-        """Node for exporting the technical analysis to a structured format."""
-        symbol = state["symbol"]
-        self.logger.info(f"Exporting technical analysis for {symbol}...")
-        llm = state["llm"]
-        results = state["results"]
-
-        prompt = PromptTemplate.from_template(
-            """Based on the following technical analysis for {symbol}, extract the required information and populate the structured output object. Set the report_date to today's date.
-            
-            Technical Analysis: {analysis}
-            """
-        )
-
-        chain = prompt | llm.with_structured_output(TechnicalHistoricalTrackedValues)
-
-        structured_data = await chain.ainvoke({
-            "symbol": symbol,
-            "analysis": results["analysis"]
-        })
-
-        state["results"]["structured_data"] = structured_data.model_dump()
-        state["usage"]["export_analysis"] = {
-            "token_usage": None,
-            "api_usage": None
-        }
-        return state
-
     def create_graph(self):
-        """Create the technical analysis graph with export_analysis node."""
+        """Create the technical analysis graph (no export_analysis node)."""
         graph = StateGraph(State)
         graph.add_node("technical_analysis", self.technical_analysis)
-        graph.add_node("export_analysis", self.export_analysis)
         graph.add_edge(START, "technical_analysis")
-        graph.add_edge("technical_analysis", "export_analysis")
-        graph.add_edge("export_analysis", END)
+        graph.add_edge("technical_analysis", END)
         return graph.compile()
 
-    async def analyze_technical(self, symbol: str, llm, yfinance_provider) -> dict:
+    async def analyze_technical(self, symbol: str, llm, yfinance_provider, period: str = "1d") -> dict:
         """Run the technical analysis graph for a given stock symbol."""
         graph = self.create_graph()
         initial_state = {
@@ -106,7 +95,8 @@ class TechnicalAnalysisGraph:
             "llm": llm,
             "yfinance_provider": yfinance_provider,
             "results": {},
-            "usage": {}
+            "usage": {},
+            "period": period # Set period to "1d" by default
         }
         result = await graph.ainvoke(initial_state)
         return result["results"]

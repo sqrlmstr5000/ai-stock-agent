@@ -19,12 +19,6 @@ const router = createRouter({
       meta: { title: 'Analysis' }
     },
     {
-      path: '/settings',
-      name: 'settings',
-      component: () => import('../views/SettingsView.vue'),
-      meta: { title: 'Settings' }
-    },
-    {
       path: '/analysis/:symbol',
       name: 'analysis-symbol',
       // route level code-splitting
@@ -32,6 +26,24 @@ const router = createRouter({
       // which is lazy-loaded when the route is visited.
       component: () => import('../views/AnalysisView.vue'),
       meta: { title: 'Analysis' }
+    },
+    {
+      path: '/analysis/:symbol/fundamental/:reportId',
+      name: 'analysis-symbol-fundamental',
+      component: () => import('../views/AnalysisView.vue'),
+      meta: { title: 'Fundamental Analysis' }
+    },
+    {
+      path: '/analysis/:symbol/technical/:reportId',
+      name: 'analysis-symbol-technical',
+      component: () => import('../views/AnalysisView.vue'),
+      meta: { title: 'Technical Analysis' }
+    },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('../views/SettingsView.vue'),
+      meta: { title: 'Settings' }
     },
     {
       path: '/portfolio',

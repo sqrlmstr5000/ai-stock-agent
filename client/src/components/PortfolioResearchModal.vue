@@ -37,6 +37,9 @@ const renderedReport = computed(() => {
   if (report.dca_analysis) {
     mdText += `## DCA Analysis\n${report.dca_analysis}\n\n`
   }
+  if (report.economic_analysis) {
+    mdText += `## Economic Analysis\n${report.economic_analysis}\n\n`
+  }
   if (report.portfolio_analysis) {
     mdText += `## Portfolio Analysis\n${report.portfolio_analysis}\n\n`
   }

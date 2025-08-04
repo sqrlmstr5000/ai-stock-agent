@@ -20,17 +20,26 @@ from models.marketdata import (
     NewsItem,
 )
 
-logger = setup_logger(__name__)
+
 
 class YFinanceProvider(MarketDataProvider):
     def __init__(self, symbol: str):
         self.symbol = symbol
         self.stock = yf.Ticker(symbol)
+        self.logger = setup_logger(__name__)
 
-    def get_technical_indicators(self) -> TechnicalIndicators:
+    def get_technical_indicators(self, period) -> Optional[TechnicalIndicators]:
         # Fetch technical data
-        hist = self.stock.history(period='1y')
-        logger.debug(f"yfinance hist: {hist.to_json(indent=2, date_format='iso')}")
+        interval = '1d'
+        if period == '1d':
+            interval = '1h'
+        hist = self.stock.history(period=period, interval=interval)
+        self.logger.debug(f"yfinance hist: {hist.to_json(indent=2, date_format='iso')}")
+
+        # Return None if no close data
+        if hist.empty or 'Close' not in hist or hist['Close'].isna().all():
+            self.logger.warning(f"No historical close data for {self.symbol} with period '{period}'")
+            return None
 
         # Calculate indicators
         sma_20 = hist['Close'].rolling(window=20).mean()
@@ -46,8 +55,8 @@ class YFinanceProvider(MarketDataProvider):
             ohlcv_df[col] = ohlcv_df[col].map('{:.4f}'.format)
         ohlcv_df['Volume'] = ohlcv_df['Volume'].astype(int).astype(str)
 
-        # Format index to string 'YYYY-MM-DD'
-        ohlcv_df.index = ohlcv_df.index.strftime('%Y-%m-%d')
+        # Format index to string 'YYYY-MM-DD HH:MM:SS'
+        ohlcv_df.index = ohlcv_df.index.strftime('%Y-%m-%d %H:%M:%S')
         ohlcv_data = ohlcv_df.to_dict(orient='index')
 
         data = {
@@ -59,20 +68,20 @@ class YFinanceProvider(MarketDataProvider):
             'volume_trend': float(hist['Volume'].iloc[-5:].mean() / hist['Volume'].iloc[-20:].mean()),
             'ohlcv': ohlcv_data
         }
-        logger.info("yfinance technical data:")
-        logger.info(f"{json.dumps(data, indent=2)}")
+        self.logger.info("yfinance technical data:")
+        self.logger.info(f"{json.dumps(data, indent=2)}")
         return TechnicalIndicators(**data)
 
     def get_dividend_history(self) -> DividendHistory:
         div = self.stock.dividends
-        logger.debug(f"yfinance dividends: {div.to_json(indent=2, date_format='iso')}")
+        self.logger.debug(f"yfinance dividends: {div.to_json(indent=2, date_format='iso')}")
 
         div.index = div.index.strftime('%Y-%m-%d')
         return DividendHistory(dividends=div.to_dict())
 
     def get_earnings_history(self) -> EarningsHistory:
         income = self.stock.income_stmt
-        logger.debug(f"yfinance earnings: {income.to_json(indent=2, date_format='iso')}")
+        self.logger.debug(f"yfinance earnings: {income.to_json(indent=2, date_format='iso')}")
 
         income_t = income.transpose()
         earnings_history = []
@@ -90,15 +99,15 @@ class YFinanceProvider(MarketDataProvider):
                 total_revenue=row.get("Total Revenue"),
                 operating_revenue=row.get("Operating Revenue"),
             ))
-        logger.info("yfinance income_stmt data:")
-        logger.info(f"{json.dumps(earnings_history, indent=2)}")
+        self.logger.info("yfinance income_stmt data:")
+        self.logger.info(f"{json.dumps(earnings_history, indent=2)}")
         return EarningsHistory(earnings=earnings_history)
 
     def get_market_data(self) -> MarketData:
         # Fetch market data
         info = self.stock.info
 
-        logger.debug(f"yfinance info: {json.dumps(info, indent=2)}")
+        self.logger.debug(f"yfinance info: {json.dumps(info, indent=2)}")
         data = {
             'sector': info.get('sector', 'Unknown'),
             'industry': info.get('industry', 'Unknown'),
@@ -127,15 +136,15 @@ class YFinanceProvider(MarketDataProvider):
             'operating_cash_flow': info.get('operatingCashflow', 0),
             'free_cash_flow': info.get('freeCashflow', 0),
         }
-        logger.info("yfinance market data:")
-        logger.info(f"{json.dumps(data, indent=2)}")
+        self.logger.info("yfinance market data:")
+        self.logger.info(f"{json.dumps(data, indent=2)}")
         return MarketData(**data)
 
     def get_news(self) -> News:
             # Fetch news
         raw_news = self.stock.news
-        logger.debug(f"yfinance news: {json.dumps(raw_news, indent=2)}")
-        logger.info(f"yfinance returned {len(raw_news)} news items for {self.symbol}.")
+        self.logger.debug(f"yfinance news: {json.dumps(raw_news, indent=2)}")
+        self.logger.info(f"yfinance returned {len(raw_news)} news items for {self.symbol}.")
         news = raw_news[:10]  # Last x news items
 
         news_data = []
@@ -148,6 +157,6 @@ class YFinanceProvider(MarketDataProvider):
                 timestamp=content.get('pubDate', '')
             ))
 
-        logger.info("yfinance news data:")
-        logger.info(f"{json.dumps([item.model_dump() for item in news_data], indent=2)}")
+        self.logger.info("yfinance news data:")
+        self.logger.info(f"{json.dumps([item.model_dump() for item in news_data], indent=2)}")
         return News(news=news_data)

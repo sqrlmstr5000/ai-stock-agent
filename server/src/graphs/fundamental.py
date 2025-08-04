@@ -1,4 +1,3 @@
-
 import json
 from typing import Dict, List
 from datetime import datetime
@@ -15,6 +14,7 @@ from providers.yfinance import YFinanceProvider
 from providers.alphavantage import AlphaVantageProvider
 from models.marketdata import HistoricalTrackedValues
 from utils.prompts import system_message
+from server.src.graphs.technical import TechnicalAnalysisGraph
 
 class State(TypedDict):
     # Messages have the type "list". The `add_messages` function
@@ -26,13 +26,15 @@ class State(TypedDict):
     results: Dict
     yfinance_provider: YFinanceProvider
     alphavantage_provider: AlphaVantageProvider
-    technical_analysis: str
     usage: Dict[str, dict]  # For per-node usage and API tracking
+    period: str  # For technical analysis
 
 class FundamentalGraph:
     def __init__(self, llm,):
         self.logger = setup_logger(self.__class__.__name__)
         self.llm = llm
+        self.technical_graph = TechnicalAnalysisGraph(llm)
+        self.graph = self.create_analysis_graph()
 
     # Market Analysis Node (without dividend analysis)
     async def market_analysis(self, state: State) -> State:
@@ -180,7 +182,6 @@ class FundamentalGraph:
     async def generate_recommendation(self, state: State) -> State:
         """Node for final recommendation"""
         symbol = state["symbol"]
-        technical_analysis = state["technical_analysis"]
         self.logger.info(f"Generating final recommendation for {symbol}...")
         llm = state["llm"]
         results = state["results"]
@@ -212,7 +213,7 @@ class FundamentalGraph:
         chain = prompt | llm
         final_recommendation = await chain.ainvoke({
             "symbol": symbol,
-            "technical": technical_analysis,
+            "technical": results["technical"]["analysis"],
             "market": results["market"]["analysis"],
             "dividend": results["dividend"]["analysis"],
             "news": results["news"]["analysis"]
@@ -267,25 +268,27 @@ class FundamentalGraph:
         return state
 
     def create_analysis_graph(self) -> Runnable:
-        """Create the analysis workflow graph with dividend analysis as its own node (no technical node)"""
-        workflow = StateGraph(State)
+        """Create the analysis workflow graph with technical analysis node included."""
+        graph = StateGraph(State)
 
-        workflow.add_node("market", self.market_analysis)
-        workflow.add_node("dividend", self.dividend_analysis)
-        workflow.add_node("news", self.news_analysis)
-        workflow.add_node("recommendation", self.generate_recommendation)
-        workflow.add_node("export_analysis", self.export_analysis)
+        graph.add_node("technical", self.technical_graph.technical_analysis)
+        graph.add_node("market", self.market_analysis)
+        graph.add_node("dividend", self.dividend_analysis)
+        graph.add_node("news", self.news_analysis)
+        graph.add_node("recommendation", self.generate_recommendation)
+        graph.add_node("export_analysis", self.export_analysis)
 
         # Define edges
-        workflow.add_edge(START, "market")
-        workflow.add_edge("market", "dividend")
-        workflow.add_edge("dividend", "news")
-        workflow.add_edge("news", "recommendation")
-        workflow.add_edge("recommendation", "export_analysis")
-        workflow.add_edge("export_analysis", END)
-        return workflow.compile()
+        graph.add_edge(START, "technical")
+        graph.add_edge("technical", "market")
+        graph.add_edge("market", "dividend")
+        graph.add_edge("dividend", "news")
+        graph.add_edge("news", "recommendation")
+        graph.add_edge("recommendation", "export_analysis")
+        graph.add_edge("export_analysis", END)
+        return graph.compile()
 
-    async def analyze_stock(self, symbol: str, technical_analysis: str) -> Dict:
+    async def analyze_stock(self, symbol: str) -> Dict:
         """Run complete stock analysis"""
         self.logger.info(f"Analyzing {symbol}...")
 
@@ -302,8 +305,8 @@ class FundamentalGraph:
             "results": {},
             "yfinance_provider": yfinance_provider,
             "alphavantage_provider": alphavantage_provider,
-            "technical_analysis": technical_analysis,
-            "usage": {}  # Explicitly initialize usage dict
+            "usage": {},  # Explicitly initialize usage dict
+            "period": "1y"  # Set period to 1y for technical analysis
         }
 
         # Run analysis

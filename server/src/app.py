@@ -11,6 +11,7 @@ from graphs.technical import TechnicalAnalysisGraph
 from graphs.portfolio import PortfolioGraph
 from providers.yfinance import YFinanceProvider
 from providers.alphavantage import AlphaVantageProvider
+from scheduler import Scheduler
 from services.database import db_manager, Stock, Research, HistoricalValues
 from utils.logging import setup_logger
 from models.models import ApiRequestUsage
@@ -29,7 +30,7 @@ class StockAnalysisApp:
         """Initialize the StockAnalysisApp with database and advisors (only once)"""
         if self._initialized:
             return
-            
+
         self.db_manager = db_manager  # Use the singleton instance
         # self.stock_advisor = StockAdvisor(db_manager=self.db_manager)
         self.logger = setup_logger("stock_app")
@@ -38,6 +39,11 @@ class StockAnalysisApp:
         self.fundamental_graph = FundamentalGraph(llm=self.llm)
         self.technical_graph = TechnicalAnalysisGraph(llm=self.llm)
         self.portfolio_graph = PortfolioGraph(llm=self.llm)
+
+        # Initialize and start the scheduler
+        self.scheduler = Scheduler(app=self)
+        self.scheduler.start()
+
         self._initialized = True
 
     # Initialize the ollama endpoint
@@ -97,16 +103,11 @@ class StockAnalysisApp:
             if not research:
                 return {"message": "Research not found", "data": ""}
 
-            report_part_technical = None
-            # Use get_dayof_technical to get technical for the same day as research
-            technical_entry = self.db_manager.get_dayof_technical(research.stock, research.created_at.date())
-            if technical_entry:
-                report_part_technical = technical_entry.technical
             report_parts = [
                 f"# {research.stock.symbol} Research Report\n",
                 f"\n**Date:** {research.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n",
                 "\n## Technical Analysis\n",
-                report_part_technical or "No technical analysis available.",
+                research.technical or "No technical analysis available.",
                 "\n## Market Analysis\n",
                 research.market or "No market analysis available.",
                 "\n## News Analysis\n",
@@ -130,11 +131,8 @@ class StockAnalysisApp:
             # Get or create stock in database
             stock = self.db_manager.get_or_create_stock(symbol)
 
-            # Get latest technical analysis
-            ta = self.db_manager.get_latest_technical(stock)
-
             # Get analysis from FundamentalGraph (async)
-            graph_result = await self.fundamental_graph.analyze_stock(symbol=symbol, technical=ta)
+            graph_result = await self.fundamental_graph.analyze_stock(symbol=symbol)
             results = graph_result["results"]
             usage = graph_result.get("usage", {})
             results_str = self.fundamental_graph.get_report_str(symbol, results)
@@ -145,6 +143,7 @@ class StockAnalysisApp:
                 market=results.get("market", {}).get("analysis", "N/A"),
                 dividend=results.get("dividend", {}).get("analysis", "N/A"),
                 news=results.get("news", {}).get("analysis", "N/A"),
+                technical=results.get("technical", {}).get("analysis", "N/A"),
                 recommendation=results.get("recommendation"),
                 structured_output=results_structured_output
             )
@@ -450,6 +449,7 @@ class StockAnalysisApp:
             # Save to PortfolioResearch table using the singleton db_manager
             self.db_manager.create_portfolio_research(
                 dca_analysis=results.get("dca_analysis"),
+                economic_analysis=results.get("economic_analysis"),
                 portfolio_analysis=results.get("portfolio_analysis")
             )
             return {
@@ -479,6 +479,7 @@ class StockAnalysisApp:
         return [
             {
                 "id": r.id,
+                "step": r.step,
                 "provider": r.provider,
                 "count": r.count,
                 "created_at": str(r.created_at)
@@ -511,6 +512,29 @@ class StockAnalysisApp:
         return usage
 
     #
+    # Scheduler
+    #
+    def get_scheduled_jobs(self) -> list:
+        """Return a list of all scheduled jobs with their details."""
+        jobs = self.scheduler.get_all_jobs()
+        job_list = []
+        for job in jobs:
+            job_list.append({
+                'id': job.id,
+                'name': job.name,
+                'next_run_time': str(job.next_run_time),
+                'trigger': str(job.trigger),
+                'func_ref': str(job.func_ref),
+                'args': job.args,
+                'kwargs': job.kwargs
+            })
+        return job_list
+    
+    def trigger_job(self, job_id: str) -> bool:
+        """Trigger a scheduled job to run immediately by job_id."""
+        return self.scheduler.trigger_job_now(job_id)
+
+    #
     # Scheduled Reports
     #
     async def daily_stock_report(self, max_api_calls=25):
@@ -541,7 +565,7 @@ class StockAnalysisApp:
                     self.logger.warning(f"API limit reached for {provider}. Stopping daily stock report.")
                     break
 
-    async def monthly_portfolio_analysis(self):
+    async def portfolio_analysis(self):
         portfolio = self.get_portfolio()
         dbm = self.db_manager
         self.logger.info("Starting monthly portfolio analysis.")

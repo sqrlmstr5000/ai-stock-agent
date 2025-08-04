@@ -9,7 +9,8 @@ from langchain_core.prompts import PromptTemplate
 from langgraph.graph import StateGraph, START, END
 from langchain_core.runnables import Runnable
 from langgraph.graph.message import add_messages
-from server.src.utils.logging import setup_logger
+from utils.logging import setup_logger
+from providers.fred import FredProvider
 
 # State object for PortfolioGraph
 class State(TypedDict):
@@ -18,6 +19,7 @@ class State(TypedDict):
     portfolio: List[dict]
     cash_balance: float
     llm: any
+    fred_provider: FredProvider
     results: Dict
     usage: Dict[str, dict]
 
@@ -32,7 +34,7 @@ class PortfolioGraph:
         llm = state["llm"]
         summaries = state["summaries"]
         cash_balance = state.get("cash_balance", 0)
-        self.logger.info(f"Running portfolio analysis on {len(summaries)} summaries with cash balance ${cash_balance}...")
+        self.logger.info(f"Running DCA analysis on {len(summaries)} summaries with cash balance ${cash_balance}...")
         prompt = PromptTemplate.from_template(
             """Given the following reports from our stock analyst:
             {summaries}
@@ -66,7 +68,8 @@ class PortfolioGraph:
         # Use last 30 days for FRED data
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-        fred_trends = self.fred_provider.get_series_trend(start_date=start_date, end_date=end_date)
+        fred_provider = state.get("fred_provider")
+        fred_trends = fred_provider.get_series_trend(start_date=start_date, end_date=end_date) if fred_provider else {}
 
         prompt = PromptTemplate.from_template(
             """
@@ -124,7 +127,7 @@ class PortfolioGraph:
         dca_result = state["results"].get("dca_analysis", "")
         economic_analysis = state["results"].get("economic_analysis", "")
         cash_balance = state.get("cash_balance", 0)
-        self.logger.info(f"Running portfolio analysis on {len(portfolio)} portfolio with cash balance ${cash_balance}...")
+        self.logger.info(f"Running portfolio analysis on {len(portfolio)} symbols with cash balance ${cash_balance}...")
         prompt = PromptTemplate.from_template(
             """Given the following stock portfolio:
             {portfolio}

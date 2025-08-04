@@ -1,4 +1,5 @@
 import os
+import json
 from datetime import datetime, date
 from importlib import util
 from peewee import *
@@ -99,10 +100,18 @@ class DatabaseManager:
             (version,)
         )
 
-    def get_or_create_stock(self, symbol: str) -> Stock:
-        """Get or create a stock entry"""
-        stock, created = Stock.get_or_create(symbol=symbol.upper())
-        return stock
+    def get_or_create_stock(self, symbol: str) -> Optional[Stock]:
+        """Get or create a stock entry, returns None if creation fails"""
+        try:
+            stock, created = Stock.get_or_create(symbol=symbol.upper())
+            if stock is not None:
+                return stock
+            else:
+                logger.error(f"Failed to get or create stock for symbol: {symbol}")
+                return None
+        except Exception as e:
+            logger.error(f"Exception in get_or_create_stock for symbol {symbol}: {e}")
+            return None
 
     # --- TransactionLog Methods ---
     @staticmethod
@@ -157,6 +166,7 @@ class DatabaseManager:
         stock: Stock,
         market: str = None,
         news: str = None,
+        technical: str = None,
         dividend: str = None,
         recommendation: str = None,
         structured_output: dict = None
@@ -166,6 +176,7 @@ class DatabaseManager:
             stock=stock,
             market=market,
             news=news,
+            technical=technical,
             dividend=dividend,
             recommendation=recommendation,
             structured_output=structured_output
@@ -188,6 +199,33 @@ class DatabaseManager:
                    .where(Research.stock == stock)
                    .order_by(Research.created_at.desc())
                    .limit(limit))
+    
+    @staticmethod
+    def get_all_research_history_list(stock: Stock, limit: int = 9) -> list:
+        """Get research history for a stock, selecting only id, symbol, created_at, and structured_output with parsed fields."""
+        query = (Research
+                 .select(Research.id, Research.stock, Research.created_at, Research.structured_output)
+                 .order_by(Research.created_at.desc())
+                 .limit(limit))
+        results = []
+        for entry in query:
+            # Parse structured_output JSON and extract required fields
+            so = entry.structured_output
+            if isinstance(so, str):
+                try:
+                    so = json.loads(so)
+                except Exception:
+                    so = {}
+            results.append({
+                "id": entry.id,
+                "symbol": entry.stock.symbol,
+                "created_at": str(entry.created_at),
+                "final_recommendation": so.get("final_recommendation"),
+                "final_confidence_score": so.get("final_confidence_score"),
+                "high_price_target": so.get("high_price_target"),
+                "price_target_percent": so.get("price_target_percent")
+            })
+        return results
 
     @staticmethod
     def get_research_by_symbol(symbol: str) -> list:
@@ -296,13 +334,11 @@ class DatabaseManager:
     def create_technical(
         stock: Stock,
         technical: str = None,
-        structured_output: dict = None
     ):
         """Create a new technical analysis entry for a stock"""
         return TechnicalAnalysis.create(
             stock=stock,
             technical=technical,
-            structured_output=structured_output
         )
 
     @staticmethod
@@ -392,6 +428,7 @@ class DatabaseManager:
     def create_portfolio_research(
         report_date: date = None,
         dca_analysis: str = None,
+        economic_analysis: str = None,
         portfolio_analysis: str = None,
         notes: str = None
     ) -> PortfolioResearch:
@@ -401,6 +438,7 @@ class DatabaseManager:
         return PortfolioResearch.create(
             report_date=report_date,
             dca_analysis=dca_analysis,
+            economic_analysis=economic_analysis,
             portfolio_analysis=portfolio_analysis,
             notes=notes
         )
