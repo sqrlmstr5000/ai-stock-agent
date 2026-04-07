@@ -1,6 +1,12 @@
 <template>
   <div class="p-8">
     <div class="mb-8">
+      <h2 class="text-xl font-semibold mb-2">Maintenance</h2>
+  <button @click="syncStockSplits" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded mb-2">Sync Stock Splits</button>
+  <button @click="backupDatabase" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mb-2 ml-2">Backup Database</button>
+  <div v-if="backupMessage" class="text-green-600 mt-2">{{ backupMessage }}</div>
+    </div>
+    <div class="mb-8">
       <h2 class="text-xl font-semibold mb-2">Scheduled Jobs</h2>
       <table class="min-w-full bg-white dark:bg-gray-800 border rounded mb-4">
         <thead>
@@ -100,6 +106,27 @@ import { ref, computed, onMounted } from 'vue'
 const jobs = ref([])
 const jobMessage = ref('')
 
+const splitMessage = ref('')
+
+const backupMessage = ref('')
+
+
+async function backupDatabase() {
+  backupMessage.value = ''
+  try {
+    const res = await fetch('/api/system/backup', { method: 'POST' })
+    if (res.ok) {
+      const json = await res.json()
+      backupMessage.value = json.message + (json.backup_path ? `: ${json.backup_path}` : '')
+    } else {
+      const err = await res.json()
+      backupMessage.value = err.detail || 'Failed to backup database.'
+    }
+  } catch (e) {
+    backupMessage.value = `Error backing up database: ${e}`
+  }
+}
+
 const providerUsage = ref([])
 const tokenUsage = ref([])
 const providerStart = ref('')
@@ -119,6 +146,22 @@ tokenUsage.value = tokenJson.data || []
   const jobsJson = await jobsRes.json()
   jobs.value = jobsJson.data || []
 })
+
+async function syncStockSplits() {
+  splitMessage.value = ''
+  try {
+    const res = await fetch('/api/stocks/split', { method: 'POST' })
+    if (res.ok) {
+      const json = await res.json()
+      splitMessage.value = json.message || 'Stock splits sync completed.'
+    } else {
+      const err = await res.json()
+      splitMessage.value = err.detail || 'Failed to sync stock splits.'
+    }
+  } catch (e) {
+    splitMessage.value = `Error syncing stock splits: ${e}`
+  }
+}
 async function runJob(jobId) {
   jobMessage.value = ''
   try {

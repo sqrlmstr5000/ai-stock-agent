@@ -3,7 +3,7 @@ import requests
 from typing import Dict, List, Optional, Tuple
 import json
 from utils.logging import setup_logger
-from services.utils import safe_float, calculate_yoy_growth, find_by_date
+from utils.financial import safe_float, calculate_yoy_growth, find_by_date
 from base.market_data_provider import MarketDataProvider
 from models.marketdata import (
     TechnicalIndicators,
@@ -15,23 +15,22 @@ from models.marketdata import (
     NewsItem,
 )
 import pandas as pd
-from services.utils import calculate_rsi
+from utils.financial import calculate_rsi, safe_float
 
 logger = setup_logger(__name__)
 
 class AlphaVantageProvider(MarketDataProvider):
-    def __init__(self, symbol: str):
-        self.symbol = symbol
+    def __init__(self):
         self.api_key = os.environ.get("ALPHA_VANTAGE_API_KEY")
         if not self.api_key:
             raise ValueError("Alpha Vantage API key not found in environment variables.")
         self.base_url = "https://www.alphavantage.co/query"
 
-    def get_technical_indicators(self) -> TechnicalIndicators:
+    def get_technical_indicators(self, symbol: str) -> TechnicalIndicators:
         # Fetch daily prices
         params = {
             "function": "TIME_SERIES_DAILY",
-            "symbol": self.symbol,
+            "symbol": symbol,
             "apikey": self.api_key,
         }
         response = requests.get(self.base_url, params=params)
@@ -40,7 +39,7 @@ class AlphaVantageProvider(MarketDataProvider):
         logger.debug(f"Alpha Vantage TIME_SERIES_DAILY: {json.dumps(daily_data, indent=2)}")
 
         if "Time Series (Daily)" not in daily_data:
-            logger.error(f"Error fetching daily data for {self.symbol}: {daily_data}")
+            logger.error(f"Error fetching daily data for {symbol}: {daily_data}")
             # Return default values or raise an exception
             return TechnicalIndicators(
                 current_price=0.0, sma_20=0.0, sma_50=0.0, sma_200=0.0, rsi=0.0, volume_trend=0.0
@@ -78,10 +77,10 @@ class AlphaVantageProvider(MarketDataProvider):
             ohlcv=ohlcv
         )
 
-    def get_dividend_history(self) -> DividendHistory:
+    def get_dividend_history(self, symbol: str) -> DividendHistory:
         params = {
             "function": "CASH_FLOW",
-            "symbol": self.symbol,
+            "symbol": symbol,
             "apikey": self.api_key,
         }
         response = requests.get(self.base_url, params=params)
@@ -175,6 +174,22 @@ class AlphaVantageProvider(MarketDataProvider):
             gross_profit = safe_float(report_data.get("grossProfit")) if report_data else None
             operating_cashflow = safe_float(report_data.get("operatingCashflow")) if report_data else None
             capital_expenditures = safe_float(report_data.get("capitalExpenditures")) if report_data else None
+            # Warning for None values
+            for name, val in [
+                ("ebit", ebit),
+                ("revenue", revenue),
+                ("total_assets", total_assets),
+                ("current_liabilities", current_liabilities),
+                ("total_liabilities", total_liabilities),
+                ("total_shareholder_equity", total_shareholder_equity),
+                ("inventory", inventory),
+                ("cash_and_equiv", cash_and_equiv),
+                ("gross_profit", gross_profit),
+                ("operating_cashflow", operating_cashflow),
+                ("capital_expenditures", capital_expenditures)
+            ]:
+                if val is None:
+                    logger.warning(f"{name} is None in create_earning.")
 
             capital_employed = total_assets - current_liabilities if total_assets is not None and current_liabilities is not None else None
             if ebit is not None and capital_employed is not None and capital_employed != 0:
@@ -219,12 +234,12 @@ class AlphaVantageProvider(MarketDataProvider):
 
         return Earning(**base_earning)
     
-    def get_earnings_history(self) -> EarningsHistory:
+    def get_earnings_history(self, symbol: str) -> EarningsHistory:
         request_count = 0
         # Fetch earnings per share
         params = {
             "function": "EARNINGS",
-            "symbol": self.symbol,
+            "symbol": symbol,
             "apikey": self.api_key,
         }
         response = requests.get(self.base_url, params=params)
@@ -235,7 +250,7 @@ class AlphaVantageProvider(MarketDataProvider):
         # Fetch income statement
         params = {
             "function": "INCOME_STATEMENT",
-            "symbol": self.symbol,
+            "symbol": symbol,
             "apikey": self.api_key,
         }
         response = requests.get(self.base_url, params=params)
@@ -246,7 +261,7 @@ class AlphaVantageProvider(MarketDataProvider):
         # Fetch balance sheet
         params = {
             "function": "BALANCE_SHEET",
-            "symbol": self.symbol,
+            "symbol": symbol,
             "apikey": self.api_key,
         }
         response = requests.get(self.base_url, params=params)
@@ -321,12 +336,12 @@ class AlphaVantageProvider(MarketDataProvider):
         logger.debug(f"{json.dumps(earnings_history.model_dump(), indent=2)}")
         return earnings_history, request_count
 
-    def get_market_data(self) -> MarketData:
+    def get_market_data(self, symbol: str) -> MarketData:
         request_count = 0
         # Fetch overview data
         params = {
             "function": "OVERVIEW",
-            "symbol": self.symbol,
+            "symbol": symbol,
             "apikey": self.api_key,
         }
         response = requests.get(self.base_url, params=params)
@@ -334,14 +349,17 @@ class AlphaVantageProvider(MarketDataProvider):
         request_count += 1
         logger.debug(f"Alpha Vantage OVERVIEW: {overview_data}")
 
+        # Return None if rate limit is hit
+        if any("rate limit" in str(v).lower() for v in overview_data.values()):
+            logger.warning(f"Alpha Vantage rate limit hit for {symbol}: {overview_data}")
+            return None, request_count
+
         return MarketData(
             sector=overview_data.get("Sector", "Unknown"),
             industry=overview_data.get("Industry", "Unknown"),
             market_cap=int(overview_data.get("MarketCapitalization", 0)),
             beta=safe_float(overview_data.get("Beta", 1.0)) or 0.0,
             pe_ratio=safe_float(overview_data.get("PERatio", 0)) or 0.0,
-            dividend_yield=safe_float(overview_data.get("DividendYield", 0)) or 0.0,
-            divident_rate=safe_float(overview_data.get("DividendPerShare", 0)) or 0.0,
             trailing_eps=safe_float(overview_data.get("EPS", 0)) or 0.0,
             forward_pe=safe_float(overview_data.get("ForwardPE", 0)) or 0.0,
             peg_ratio=safe_float(overview_data.get("PEGRatio", 0)) or 0.0,
@@ -354,10 +372,10 @@ class AlphaVantageProvider(MarketDataProvider):
             revenue_per_share=safe_float(overview_data.get("RevenuePerShareTTM", 0)) or 0.0,
         ), request_count
 
-    def get_news(self) -> News:
+    def get_news(self, symbol: str) -> News:
         params = {
             "function": "NEWS_SENTIMENT",
-            "tickers": self.symbol,
+            "tickers": symbol,
             "apikey": self.api_key,
         }
         response = requests.get(self.base_url, params=params)
@@ -376,12 +394,28 @@ class AlphaVantageProvider(MarketDataProvider):
             )
 
         return News(news=news_items)
+    
+    def get_splits(self, symbol: str):
+        """
+        Fetches stock split history using the Alpha Vantage SPLITS function.
+        Returns a list of dicts with effective_date and split_factor.
+        """
+        request_count = 0
+        params = {
+            "function": "SPLITS",
+            "symbol": symbol,
+            "apikey": self.api_key,
+        }
+        response = requests.get(self.base_url, params=params)
+        data = response.json()
+        request_count += 1
+        logger.debug(f"Alpha Vantage SPLITS: {data}")
 
-    def safe_float(value) -> Optional[float]:
-            """Safely convert a value to float, handling None and "None" cases"""
-            if value is None or value == "None" or value == "":
-                return None
-            try:
-                return float(value)
-            except (ValueError, TypeError):
-                return None
+        splits = []
+        for split in data.get("data", []):
+            splits.append({
+                "effective_date": split.get("effective_date", ""),
+                "split_factor": split.get("split_factor", "")
+            })
+        return splits, request_count
+

@@ -1,14 +1,16 @@
+
 from typing import List, Optional, Union
 import os
 import logging
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
-
+from models.models import StockSplit
 
 from utils.logging import setup_logger
 from app import StockAnalysisApp
 from models.models import Stock
 from datetime import date, datetime
+
 app = FastAPI(
     title="Stock Analysis API",
     description="API for analyzing stocks using YFinance and AlphaVantage data",
@@ -31,6 +33,7 @@ class StockResponse(BaseModel):
 
 class TransactionRequest(BaseModel):
     symbol: str = Field(..., description="Stock symbol")
+    portfolio_id: int = Field(None, description="Portfolio ID to associate with the transaction")
     action: str = Field(..., description="Transaction action: BUY, SELL, DIVIDEND_REINVESTMENT")
     shares: float = Field(..., description="Number of shares")
     price: float = Field(..., description="Price per share")
@@ -41,6 +44,7 @@ class TransactionResponse(BaseModel):
     data: dict | list | None = None
 
 class CashTransactionRequest(BaseModel):
+    portfolio_id: int = Field(None, description="Portfolio ID to associate with the transaction")
     action: str = Field(..., description="Cash action: DEPOSIT or WITHDRAWAL")
     amount: float = Field(..., description="Amount of cash to deposit or withdraw")
     transaction_date: Optional[date] = Field(None, description="Date of transaction (YYYY-MM-DD)")
@@ -49,6 +53,16 @@ class CashTransactionRequest(BaseModel):
 class CashTransactionResponse(BaseModel):
     message: str
     data: dict | list | float | None = None
+
+class PortfolioRequest(BaseModel):
+    id: Optional[int] = None
+    name: Optional[str] = None
+    rules: Optional[str] = None
+    report: Optional[str] = None
+
+class PortfolioResponse(BaseModel):
+    message: str
+    data: Union[dict, list, None] = None
 
 def handle_api_exception(e, msg=None):
     import traceback
@@ -70,6 +84,9 @@ async def root():
         }
     }
 
+# 
+# Stocks Endpoints
+#
 @app.post("/stocks", status_code=201)
 async def add_stock(stock: StockRequest) -> StockResponse:
     """Add a new stock to the database"""
@@ -110,7 +127,35 @@ async def get_stocks_research_history(limit: int = 20):
     except Exception as e:
         handle_api_exception(e, "Error getting stocks research history")
 
-# --- Stock Endpoints ---
+@app.get("/stocks/split")
+async def get_stock_splits():
+    """Get all stock splits in the database"""
+    try:
+        splits = StockSplit.select().join(Stock).order_by(Stock.symbol, StockSplit.effective_date.desc())
+        data = [
+            {
+                "symbol": split.stock.symbol,
+                "effective_date": str(split.effective_date),
+                "split_factor": split.split_factor
+            }
+            for split in splits
+        ]
+        return StockResponse(message="Stock splits fetched", data=data)
+    except Exception as e:
+        handle_api_exception(e, "Error getting stock splits")
+
+@app.post("/stocks/split")
+async def sync_stock_splits_endpoint():
+    """Trigger a sync of stock splits from AlphaVantage for all portfolio symbols"""
+    try:
+        await stock_app.sync_stock_splits()
+        return StockResponse(message="Stock splits sync triggered", data={})
+    except Exception as e:
+        handle_api_exception(e, "Error syncing stock splits")
+
+#
+# Stock Endpoints
+#
 @app.get("/stock/{symbol}/research")
 async def get_research(symbol: str) -> StockResponse:
     """Get all research for a stock"""
@@ -129,7 +174,84 @@ async def get_technical_analyses(symbol: str) -> StockResponse:
     except Exception as e:
         handle_api_exception(e, "Error getting technical analyses")
 
-@app.get("/stock/research/{research_id}")
+@app.get("/stock/{symbol}/technical/generate")
+async def generate_technical_analysis(symbol: str) -> StockResponse:
+    """Generate a new technical analysis for a stock and store it"""
+    try:
+        result = await stock_app.analyze_technical(symbol)
+        return StockResponse(**result)
+    except Exception as e:
+        handle_api_exception(e, "Error generating technical analysis")
+
+@app.get("/stock/{symbol}/swing")
+async def get_swing_analyses(symbol: str) -> StockResponse:
+    """Get all swing trade analyses for a stock"""
+    try:
+        dbm = stock_app.db_manager
+        stock = dbm.get_stock_by_symbol(symbol)
+        if not stock:
+            raise HTTPException(status_code=404, detail=f"Stock symbol {symbol} not found")
+        # Get all swing research entries for this stock
+        entries = list(stock.swingresearch.order_by(-stock.swingresearch.model.created_at))
+        data = [
+            {
+                "id": entry.id,
+                "symbol": entry.stock.symbol if entry.stock else None,
+                "created_at": str(entry.created_at),
+            }
+            for entry in entries
+        ]
+        return StockResponse(message=f"Swing trade analyses for {symbol} fetched", data=data)
+    except Exception as e:
+        handle_api_exception(e, "Error getting swing trade analyses")
+
+@app.get("/stock/{symbol}/swing/generate")
+async def generate_swing_analysis(symbol: str) -> StockResponse:
+    """Generate a new swing trade analysis for a stock and store it"""
+    try:
+        result = await stock_app.swing_trade_analysis(symbol)
+        return StockResponse(**result)
+    except Exception as e:
+        handle_api_exception(e, "Error generating swing trade analysis")
+
+@app.post("/stock/{symbol}/swing/{portfolio_id}", status_code=201)
+async def save_swing_for_portfolio(symbol: str, portfolio_id: int) -> StockResponse:
+    """Generate a swing trade analysis for a stock and save it to a portfolio (create a SwingStock entry)"""
+    try:
+        dbm = stock_app.db_manager
+        portfolio = dbm.get_portfolio_by_id(portfolio_id)
+        if not portfolio:
+            raise HTTPException(status_code=404, detail=f"Portfolio id {portfolio_id} not found")
+        # Ensure the stock exists (create if necessary)
+        stock, created = dbm.get_or_create_stock(symbol)
+        if not stock:
+            raise HTTPException(status_code=500, detail=f"Unable to create or find stock {symbol}")
+        # Generate swing analysis and store SwingResearch / plan history
+        await stock_app.swing_trade_analysis(symbol)
+        # Link this stock into the portfolio's swing list
+        swing = dbm.create_swing_stock(stock=stock, portfolio=portfolio)
+        return StockResponse(message=f"Swing trade analysis for {symbol} generated and saved to portfolio {portfolio.name}", data={"symbol": symbol, "portfolio_id": portfolio.id, "swing_id": swing.id})
+    except HTTPException:
+        raise
+    except Exception as e:
+        handle_api_exception(e, "Error saving swing trade to portfolio")
+
+@app.delete("/stock/{stock_id}")
+async def delete_stock(stock_id: int) -> StockResponse:
+    """Delete a stock from the database by id"""
+    try:
+        dbm = stock_app.db_manager
+        deleted = dbm.delete_stock_by_id(stock_id)
+        if deleted:
+            return StockResponse(message=f"Stock deleted", data={"id": stock_id})
+        else:
+            raise HTTPException(status_code=404, detail=f"Stock id {stock_id} not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        handle_api_exception(e, "Error deleting stock")
+
+@app.get("/research/{research_id}")
 async def get_research_report(research_id: int) -> StockResponse:
     """Get a research report by its ID"""
     try:
@@ -138,7 +260,7 @@ async def get_research_report(research_id: int) -> StockResponse:
     except Exception as e:
         handle_api_exception(e, "Error getting research report")
 
-@app.get("/stock/technical/{technical_id}")
+@app.get("technical/{technical_id}")
 async def get_technical_report_by_id(technical_id: int) -> StockResponse:
     """Get a technical analysis report by its ID"""
     try:
@@ -147,20 +269,26 @@ async def get_technical_report_by_id(technical_id: int) -> StockResponse:
     except Exception as e:
         handle_api_exception(e, "Error getting technical report")
 
-@app.delete("/stocks/{stock_id}")
-async def delete_stock(stock_id: int) -> StockResponse:
-    """Delete a stock from the database by id"""
+@app.get("/swing/{swing_id}")
+async def get_swing_analysis_by_id(swing_id: int) -> StockResponse:
+    """Get a swing trade analysis by its ID"""
     try:
-        stock = Stock.get_or_none(Stock.id == stock_id)
-        if not stock:
-            raise HTTPException(status_code=404, detail=f"Stock id {stock_id} not found")
-        symbol = stock.symbol
-        stock.delete_instance()
-        return StockResponse(message=f"Stock {symbol} deleted", data={"id": stock_id, "symbol": symbol})
-    except HTTPException:
-        raise
+        dbm = stock_app.db_manager
+        from models.models import SwingResearch
+        entry = SwingResearch.get_or_none(SwingResearch.id == swing_id)
+        if not entry:
+            raise HTTPException(status_code=404, detail=f"Swing trade analysis id {swing_id} not found")
+        data = {
+            "id": entry.id,
+            "type": "swing",
+            "stock": entry.stock.symbol if entry.stock else None,
+            "created_at": str(entry.created_at),
+            "pattern_analysis": entry.pattern_analysis,
+            "trade_recommendation": entry.trade_recommendation
+        }
+        return StockResponse(message="Swing trade analysis fetched", data=data)
     except Exception as e:
-        handle_api_exception(e, "Error deleting stock")
+        handle_api_exception(e, "Error getting swing trade analysis by id")
 
 @app.get("/analyze/{symbol}")
 async def analyze_stock(symbol: str) -> StockResponse:
@@ -209,15 +337,6 @@ async def get_market_data(symbol: str) -> StockResponse:
     except Exception as e:
         handle_api_exception(e, "Error getting market data")
 
-@app.get("/transactions")
-async def get_all_transactions() -> TransactionResponse:
-    """Get all transactions in the database"""
-    try:
-        result = stock_app.get_transactions(None)
-        return TransactionResponse(message="All transactions fetched", data=result)
-    except Exception as e:
-        handle_api_exception(e, "Error getting all transactions")
-
 @app.get("/technical/{symbol}")
 async def get_technical_data(symbol: str) -> StockResponse:
     """Get technical indicators for a stock"""
@@ -227,82 +346,105 @@ async def get_technical_data(symbol: str) -> StockResponse:
     except Exception as e:
         handle_api_exception(e, "Error getting technical data")
 
-@app.get("/technical/generate/{symbol}")
-async def generate_technical_analysis(symbol: str) -> StockResponse:
-    """Generate a new technical analysis for a stock and store it"""
-    try:
-        result = await stock_app.analyze_technical(symbol)
-        return StockResponse(**result)
-    except Exception as e:
-        handle_api_exception(e, "Error generating technical analysis")
+#
+# Portfolio 
+#
 
-# --- Transaction Endpoints ---
-@app.post("/transactions", status_code=201)
-async def add_transaction(txn: TransactionRequest) -> TransactionResponse:
-    """Add a new stock transaction log entry"""
+@app.get("/portfolios")
+async def get_portfolios() -> PortfolioResponse:
+    """Get all portfolios"""
     try:
-        result = stock_app.add_transaction(txn)
-        return TransactionResponse(message="Transaction added", data=result)
+        dbm = stock_app.db_manager
+        portfolios = dbm.get_portfolios() 
+        data = [
+            {
+                "id": p.id,
+                "name": p.name,
+            }
+            for p in portfolios
+        ]
+        return PortfolioResponse(message="All portfolios fetched", data=data)
     except Exception as e:
-        handle_api_exception(e, "Error adding transaction")
+        handle_api_exception(e, "Error getting all portfolios")
 
-@app.get("/transactions/{symbol}")
-async def get_transactions(symbol: str) -> TransactionResponse:
-    """Get all transactions for a stock symbol"""
+# Get a single portfolio by id
+@app.get("/portfolio/{portfolio_id}")
+async def get_portfolio(portfolio_id: int) -> PortfolioResponse:
+    """Get a single portfolio by id"""
     try:
-        result = stock_app.get_transactions(symbol)
-        return TransactionResponse(message="Transactions fetched", data=result)
+        dbm = stock_app.db_manager
+        portfolio = dbm.get_portfolio_by_id(portfolio_id)
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        data = {
+            "id": portfolio.id,
+            "name": portfolio.name,
+            "rules": getattr(portfolio, "rules", None),
+            "report": getattr(portfolio, "report", None),
+            "created_at": str(getattr(portfolio, "created_at", "")),
+            "updated_at": str(getattr(portfolio, "updated_at", "")),
+        }
+        return PortfolioResponse(message="Portfolio fetched", data=data)
+    except HTTPException:
+        raise
     except Exception as e:
-        handle_api_exception(e, "Error getting transactions")
+        handle_api_exception(e, "Error getting portfolio")
 
-@app.get("/transaction/{transaction_id}")
-async def get_transaction(transaction_id: int) -> TransactionResponse:
-    """Get a transaction by its ID"""
+@app.get("/portfolio/{portfolio_id}/holdings")
+async def get_portfolio_holdings(portfolio_id: int) -> TransactionResponse:
+    """Get a comprehensive portfolio summary for a specific portfolio"""
     try:
-        result = stock_app.get_transaction(transaction_id)
-        if result:
-            return TransactionResponse(message="Transaction fetched", data=result)
-        else:
-            raise HTTPException(status_code=404, detail="Transaction not found")
-    except Exception as e:
-        handle_api_exception(e, "Error getting transaction")
-
-@app.delete("/transaction/{transaction_id}")
-async def delete_transaction(transaction_id: int) -> TransactionResponse:
-    """Delete a transaction by its ID"""
-    try:
-        deleted = stock_app.delete_transaction(transaction_id)
-        if deleted:
-            return TransactionResponse(message="Transaction deleted", data=None)
-        else:
-            raise HTTPException(status_code=404, detail="Transaction not found")
-    except Exception as e:
-        handle_api_exception(e, "Error deleting transaction")
-
-# Portfolio summary endpoint
-@app.get("/portfolio")
-async def get_portfolio() -> TransactionResponse:
-    """Get a comprehensive portfolio summary"""
-    try:
-        result = stock_app.get_portfolio()
+        result = stock_app.get_portfolio_holdings_combined(portfolio_id)
         return TransactionResponse(message="Portfolio summary fetched", data=result)
     except Exception as e:
         handle_api_exception(e, "Error getting portfolio")
 
-# --- Portfolio Research Endpoints ---
-@app.get("/portfolio/research")
-async def get_portfolio_research_history(limit: int = 10) -> StockResponse:
+@app.post("/portfolio", status_code=201)
+async def save_portfolio(request: PortfolioRequest) -> PortfolioResponse:
+    """Create or update a portfolio"""
+    try:
+        dbm = stock_app.db_manager
+        portfolio = dbm.save_portfolio(
+            portfolio_id=request.id,
+            name=request.name,
+            rules=request.rules,
+            report=request.report
+        )
+        data = {
+            "id": portfolio.id,
+            "name": portfolio.name,
+            "rules": portfolio.rules,
+            "report": portfolio.report,
+            "created_at": str(getattr(portfolio, "created_at", "")),
+            "updated_at": str(getattr(portfolio, "updated_at", "")),
+        }
+        return PortfolioResponse(message="Portfolio saved", data=data)
+    except Exception as e:
+        handle_api_exception(e, "Error saving portfolio")
+
+@app.delete("/portfolio/{portfolio_id}")
+async def delete_portfolio(portfolio_id: int) -> PortfolioResponse:
+    """Delete a portfolio by id"""
+    try:
+        dbm = stock_app.db_manager
+        deleted = dbm.delete_portfolio(portfolio_id)
+        if deleted:
+            return PortfolioResponse(message="Portfolio deleted", data={"id": portfolio_id})
+        else:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+    except Exception as e:
+        handle_api_exception(e, "Error deleting portfolio")
+
+@app.get("/portfolio/{portfolio_id}/research")
+async def get_portfolio_research_history(portfolio_id: int, limit: int = 10) -> StockResponse:
     """Get portfolio research history (latest first)"""
     try:
         dbm = stock_app.db_manager
-        entries = dbm.get_portfolio_research_history(limit)
+        entries = dbm.get_portfolio_research_history(limit, portfolio_id=portfolio_id)
         data = [
             {
                 "id": entry.id,
-                "report_date": str(entry.report_date),
-                "dca_analysis": entry.dca_analysis,
-                "portfolio_analysis": entry.portfolio_analysis,
-                "notes": entry.notes
+                "created_at": str(entry.created_at),
             }
             for entry in entries
         ]
@@ -311,17 +453,18 @@ async def get_portfolio_research_history(limit: int = 10) -> StockResponse:
         handle_api_exception(e, "Error getting portfolio research history")
 
 
-@app.get("/portfolio/research/{research_id}")
-async def get_portfolio_research(research_id: int) -> StockResponse:
+@app.get("/portfolio/{portfolio_id}/research/{research_id}")
+async def get_portfolio_research(research_id: int, portfolio_id: int) -> StockResponse:
     """Get a single portfolio research entry by ID"""
     try:
         dbm = stock_app.db_manager
         if research_id == 0:
-            entry = dbm.get_latest_portfolio_research()
+            entry = dbm.get_latest_portfolio_research(portfolio_id=portfolio_id)
             if entry:
                 data = {
                     "id": entry.id,
-                    "report_date": str(entry.report_date),
+                    "type": "portfolio",
+                    "created_at": str(entry.created_at),
                     "dca_analysis": entry.dca_analysis,
                     "economic_analysis": entry.economic_analysis,
                     "portfolio_analysis": entry.portfolio_analysis,
@@ -331,12 +474,14 @@ async def get_portfolio_research(research_id: int) -> StockResponse:
             else:
                 raise HTTPException(status_code=404, detail="No portfolio research entries found")
         else:
-            entry = dbm.get_portfolio_research_history_by_id(research_id)
+            entry = dbm.get_portfolio_research_history_by_id(research_id, portfolio_id=portfolio_id)
             if entry:
                 data = {
                     "id": entry.id,
-                    "report_date": str(entry.report_date),
+                    "type": "portfolio",
+                    "created_at": str(entry.created_at),
                     "dca_analysis": entry.dca_analysis,
+                    "economic_analysis": entry.economic_analysis,
                     "portfolio_analysis": entry.portfolio_analysis,
                     "notes": entry.notes
                 }
@@ -346,32 +491,34 @@ async def get_portfolio_research(research_id: int) -> StockResponse:
     except Exception as e:
         handle_api_exception(e, "Error getting portfolio research entry")
 
-@app.post("/portfolio/analyze")
-async def analyze_portfolio() -> StockResponse:
+@app.post("/portfolio/{portfolio_id}/analyze")
+async def analyze_portfolio(portfolio_id: int) -> StockResponse:
     """Run portfolio-level analysis using current portfolio, latest recommendations, and cash balance"""
     try:
-        result = await stock_app.portfolio_analysis()
+        result = await stock_app.portfolio_analysis(portfolio_id=portfolio_id)
         return StockResponse(**result)
     except Exception as e:
         handle_api_exception(e, "Error analyzing portfolio")
 
-# --- Cash Balance Endpoints ---
-@app.get("/cash/balance")
-async def get_cash_balance() -> CashTransactionResponse:
+#
+# Portfolio Cash
+#
+@app.get("/portfolio/{portfolio_id}/cash/balance")
+async def get_cash_balance(portfolio_id: int) -> CashTransactionResponse:
     """Get the current cash balance"""
     try:
         dbm = stock_app.db_manager
-        balance = dbm.get_current_cash_balance()
+        balance = dbm.get_current_cash_balance(portfolio_id=portfolio_id)
         return CashTransactionResponse(message="Current cash balance fetched", data={"balance": round(balance, 2)})
     except Exception as e:
         handle_api_exception(e, "Error getting cash balance")
 
-@app.get("/cash/transactions")
-async def get_cash_transactions(limit: int = 100) -> CashTransactionResponse:
+@app.get("/portfolio/{portfolio_id}/cash/transactions")
+async def get_cash_transactions(portfolio_id: int, limit: int = 100) -> CashTransactionResponse:
     """Get cash transaction history (most recent first)"""
     try:
         dbm = stock_app.db_manager
-        txns = dbm.get_cash_transactions(limit)
+        txns = dbm.get_cash_transactions(limit=limit, portfolio_id=portfolio_id)
         data = [
             {
                 "id": txn.id,
@@ -386,12 +533,13 @@ async def get_cash_transactions(limit: int = 100) -> CashTransactionResponse:
     except Exception as e:
         handle_api_exception(e, "Error getting cash transactions")
 
-@app.post("/cash/transaction", status_code=201)
-async def add_cash_transaction(txn: CashTransactionRequest) -> CashTransactionResponse:
+@app.post("/portfolio/{portfolio_id}/cash/transaction", status_code=201)
+async def add_cash_transaction(portfolio_id: int, txn: CashTransactionRequest) -> CashTransactionResponse:
     """Add a new cash transaction (deposit or withdrawal)"""
     try:
         dbm = stock_app.db_manager
         new_txn = dbm.create_cash_transaction(
+            portfolio_id=portfolio_id,
             action=txn.action,
             amount=txn.amount,
             transaction_date=txn.transaction_date or datetime.now().date(),
@@ -407,6 +555,73 @@ async def add_cash_transaction(txn: CashTransactionRequest) -> CashTransactionRe
         return CashTransactionResponse(message="Cash transaction added", data=data)
     except Exception as e:
         handle_api_exception(e, "Error adding cash transaction")
+
+@app.delete("/portfolio/{portfolio_id}/research/{research_id}")
+async def delete_portfolio_research(portfolio_id: int, research_id: int) -> StockResponse:
+    """Delete a portfolio research entry by ID"""
+    try:
+        dbm = stock_app.db_manager
+        deleted = dbm.delete_portfolio_research(research_id, portfolio_id=portfolio_id)
+        if deleted:
+            return StockResponse(message="Portfolio research entry deleted", data={"id": research_id})
+        else:
+            raise HTTPException(status_code=404, detail="Portfolio research entry not found")
+    except Exception as e:
+        handle_api_exception(e, "Error deleting portfolio research entry")
+
+#
+# Portfolio Transactions
+#
+@app.get("/portfolio/{portfolio_id}/transactions")
+async def get_all_transactions(portfolio_id: int) -> TransactionResponse:
+    """Get all transactions in the database for a portfolio"""
+    try:
+        result = stock_app.get_transactions(portfolio_id=portfolio_id)
+        return TransactionResponse(message="All transactions fetched", data=result)
+    except Exception as e:
+        handle_api_exception(e, "Error getting all transactions")
+        
+@app.post("/portfolio/{portfolio_id}/transactions", status_code=201)
+async def add_transaction(portfolio_id: int, txn: TransactionRequest) -> TransactionResponse:
+    """Add a new stock transaction log entry for a portfolio"""
+    try:
+        result = stock_app.add_transaction(txn, portfolio_id=portfolio_id)
+        return TransactionResponse(message="Transaction added", data=result)
+    except Exception as e:
+        handle_api_exception(e, "Error adding transaction")
+
+@app.get("/portfolio/{portfolio_id}/transactions/{symbol}")
+async def get_transactions(portfolio_id: int, symbol: str) -> TransactionResponse:
+    """Get all transactions for a stock symbol in a portfolio"""
+    try:
+        result = stock_app.get_transactions(symbol, portfolio_id=portfolio_id)
+        return TransactionResponse(message="Transactions fetched", data=result)
+    except Exception as e:
+        handle_api_exception(e, "Error getting transactions")
+
+@app.get("/portfolio/{portfolio_id}/transaction/{transaction_id}")
+async def get_transaction(portfolio_id: int, transaction_id: int) -> TransactionResponse:
+    """Get a transaction by its ID in a portfolio"""
+    try:
+        result = stock_app.get_transaction(transaction_id, portfolio_id=portfolio_id)
+        if result:
+            return TransactionResponse(message="Transaction fetched", data=result)
+        else:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+    except Exception as e:
+        handle_api_exception(e, "Error getting transaction")
+
+@app.delete("/portfolio/{portfolio_id}/transaction/{transaction_id}")
+async def delete_transaction(portfolio_id: int, transaction_id: int) -> TransactionResponse:
+    """Delete a transaction by its ID in a portfolio"""
+    try:
+        deleted = stock_app.delete_transaction(transaction_id, portfolio_id=portfolio_id)
+        if deleted:
+            return TransactionResponse(message="Transaction deleted", data=None)
+        else:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+    except Exception as e:
+        handle_api_exception(e, "Error deleting transaction")
 
 # --- Usage Endpoints ---
 @app.get("/usage/provider")
@@ -458,6 +673,25 @@ async def trigger_job(job_id: str):
     except Exception as e:
         handle_api_exception(e, "Error triggering job")
 
+#
+# System
+#
+@app.post("/system/backup")
+async def system_backup():
+    """Trigger a database backup and return the backup file path."""
+    try:
+        dbm = stock_app.db_manager
+        backup_path = dbm.backup_database()
+        return {"message": "Database backup successful", "backup_path": backup_path}
+    except Exception as e:
+        logger.error(f"Backup failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Backup failed: {e}")
+
+# 
+# Main
+#
 if __name__ == "__main__":
     import uvicorn
+    #import openlit
+    #openlit.init()
     uvicorn.run(app, host="0.0.0.0", port=8000)

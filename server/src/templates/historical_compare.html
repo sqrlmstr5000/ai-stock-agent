@@ -1,0 +1,58 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Historical Comparison - {symbol}</title>
+    <style>
+    body {{ font-family: Arial, sans-serif; margin: 20px; }}
+    table {{ border-collapse: collapse; width: 100%; }}
+    th, td {{ border: 1px solid #ddd; padding: 8px; }}
+    th {{ background-color: #f2f2f2; }}
+    .num {{ text-align: right; }}
+    </style>
+  </head>
+  <body>
+    <h2>Historical comparison for {symbol}</h2>
+    <p>Latest: {date_latest} &nbsp; Previous: {date_prev}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>Previous</th>
+          <th>Latest</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Final Recommendation</td>
+          <td>{prev_final_recommendation}</td>
+          <td>{latest_final_recommendation}</td>
+        </tr>
+        <tr>
+         <td>Final Confidence Score</td>
+         <td>{prev_final_confidence_score}</td>
+         <td>{latest_final_confidence_score}</td>
+        </tr>
+        <tr>
+         <td>Current Price</td>
+         <td>{prev_current_price}</td>
+         <td>{latest_current_price}</td>
+        </tr>
+        <tr>
+         <td>Low Price Target</td>
+         <td>{prev_low_price_target}</td>
+         <td>{latest_low_price_target}</td>
+        </tr>
+        <tr>
+         <td>High Price Target</td>
+         <td>{prev_high_price_target}</td>
+         <td>{latest_high_price_target}</td>
+        </tr>
+        <tr>
+         <td>Price Target %</td>
+         <td>{prev_price_target_percent}</td>
+         <td>{latest_price_target_percent}</td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>

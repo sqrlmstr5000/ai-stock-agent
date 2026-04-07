@@ -116,7 +116,7 @@ const loadStocks = async () => {
 const deleteStock = async (id, symbol) => {
   if (!confirm(`Delete stock ${symbol}?`)) return;
   try {
-    await fetch(`/api/stocks/${id}`, { method: 'DELETE' });
+    await fetch(`/api/stock/${id}`, { method: 'DELETE' });
     await loadStocks();
     // If the deleted symbol was active, clear it
     if (activeSymbol.value === symbol) {

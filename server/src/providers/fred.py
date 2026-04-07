@@ -1,7 +1,10 @@
 import os
 import requests
 import math
-from services.utils import safe_float
+from utils.financial import safe_float
+from utils.logging import setup_logger
+
+logger = setup_logger(__name__)
 
 class FredProvider:
     BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
@@ -9,23 +12,23 @@ class FredProvider:
     # FRED Series IDs for common US macro indicators
     SERIES = {
         "gdp": "GDP",
-        "cpi": "CPIAUCSL",
-        "unemployment": "UNRATE",
-        "interest_rate": "FEDFUNDS",
-        "consumer_confidence": "UMCSENT",
-        "business_confidence": "NAPM",
-        "retail_sales": "RSAFS",
-        "industrial_production": "INDPRO",
-        "vix": "VIXCLS",
-        "yield_curve_10y_2y": "T10Y2Y",
-        "housing_starts": "HOUST",
-        "pmi": "NAPM",
+        "cpi": "CPIAUCSL", # Consumer Price Index for All Urban Consumers: All Items in U.S. City Average
+        "unemployment": "UNRATE", # Unemployment Rate
+        "interest_rate": "FEDFUNDS", # Federal Funds Effective Rate
+        "consumer_confidence": "UMCSENT", # University of Michigan: Consumer Sentiment
+        "retail_sales": "RSAFS", # Advance Retail Sales: Retail Trade and Food Services
+        "industrial_production": "INDPRO", # Industrial Production: Total Index
+        "vix": "VIXCLS", # CBOE Volatility Index: VIX
+        "yield_curve_10y_2y": "T10Y2Y", # 10-Year Treasury Constant Maturity Minus 2-Year Treasury Constant Maturity 
+        "housing_starts": "HOUST", # New Privately-Owned Housing Units Started: Total Units
+        "ppi": "PPIACO", # Producer Price Index by Commodity: All Commodities
     }
 
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.getenv("FRED_API_KEY")
         if not self.api_key:
             raise ValueError("FRED API key must be provided via argument or FRED_API_KEY env var.")
+        self.request_count = 0
 
     def get_series(self, series_id: str, start_date: str = None, end_date: str = None):
         params = {
@@ -38,6 +41,7 @@ class FredProvider:
         if end_date:
             params["observation_end"] = end_date
         resp = requests.get(self.BASE_URL, params=params)
+        self.request_count += 1
         resp.raise_for_status()
         return resp.json()
 
@@ -56,9 +60,6 @@ class FredProvider:
     def get_consumer_confidence(self, **kwargs):
         return self.get_series(self.SERIES["consumer_confidence"], **kwargs)
 
-    def get_business_confidence(self, **kwargs):
-        return self.get_series(self.SERIES["business_confidence"], **kwargs)
-
     def get_retail_sales(self, **kwargs):
         return self.get_series(self.SERIES["retail_sales"], **kwargs)
 
@@ -74,8 +75,8 @@ class FredProvider:
     def get_housing_starts(self, **kwargs):
         return self.get_series(self.SERIES["housing_starts"], **kwargs)
 
-    def get_pmi(self, **kwargs):
-        return self.get_series(self.SERIES["pmi"], **kwargs)
+    def get_ppi(self, **kwargs):
+        return self.get_series(self.SERIES["ppi"], **kwargs)
 
     def get_bulk_economic_data(self, start_date: str = None, end_date: str = None):
         """Fetch a bundle of key indicators for economic analysis."""
@@ -85,17 +86,17 @@ class FredProvider:
             "unemployment": self.get_unemployment(start_date=start_date, end_date=end_date),
             "interest_rate": self.get_interest_rate(start_date=start_date, end_date=end_date),
             "consumer_confidence": self.get_consumer_confidence(start_date=start_date, end_date=end_date),
-            "business_confidence": self.get_business_confidence(start_date=start_date, end_date=end_date),
             "retail_sales": self.get_retail_sales(start_date=start_date, end_date=end_date),
             "industrial_production": self.get_industrial_production(start_date=start_date, end_date=end_date),
             "vix": self.get_vix(start_date=start_date, end_date=end_date),
             "yield_curve": self.get_yield_curve(start_date=start_date, end_date=end_date),
             "housing_starts": self.get_housing_starts(start_date=start_date, end_date=end_date),
-            "pmi": self.get_pmi(start_date=start_date, end_date=end_date),
+            "ppi": self.get_ppi(start_date=start_date, end_date=end_date),
         }
 
     def get_series_trend(self, start_date: str = None, end_date: str = None):
         """Fetch bulk economic data and calculate summary stats for each series."""
+        logger.info(f"Fetching economic data from FRED for period {start_date} to {end_date}...")
         bulk_data = self.get_bulk_economic_data(start_date=start_date, end_date=end_date)
         trends = {}
         for key, series_data in bulk_data.items():
@@ -161,4 +162,5 @@ class FredProvider:
                 'mean_value': mean_value,
                 'std_dev': std_dev
             }
-        return trends
+            logger.debug(f"Processed {key} trend: {trends[key]}")
+        return trends, self.request_count

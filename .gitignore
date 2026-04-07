@@ -2,6 +2,7 @@
 output/*.md
 *.env
 /config
+/output
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

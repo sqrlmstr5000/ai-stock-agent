@@ -1,8 +1,9 @@
 <template>
   <div>
-    <div class="p-4 bg-gray-100 border-b border-gray-200 flex flex-wrap gap-4 justify-between items-center">
-      <button @click="generateResearch" class="px-4 py-2 font-semibold text-white bg-blue-500 rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
-        Generate Research
+  <div class="p-4 bg-gray-100 border-b border-gray-200 flex flex-row flex-wrap gap-4 items-start">
+      <button @click="generateResearch" :disabled="generatingResearch" class="px-4 py-2 font-semibold text-white bg-blue-500 rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+        <span v-if="generatingResearch">Generating...</span>
+        <span v-else>Research</span>
       </button>
       <div class="relative" ref="dropdownContainer">
         <button @click="toggleDropdown" class="px-4 py-2 font-semibold text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200">
@@ -18,9 +19,9 @@
           </li>
         </ul>
       </div>
-      <div class="flex gap-2">
+  <div class="flex flex-row gap-2 items-start">
         <button @click="generateTechnical" class="px-4 py-2 font-semibold text-white bg-green-600 rounded hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50">
-          Generate Technical Analysis
+          Technical Analysis
         </button>
         <div class="relative" ref="techDropdownContainer">
           <button @click="toggleTechDropdown" class="px-4 py-2 font-semibold text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200">
@@ -36,6 +37,25 @@
             </li>
           </ul>
         </div>
+        <!-- Swing Plan Button and Dropdown -->
+        <button @click="generateSwing" :disabled="generatingSwing" class="px-4 py-2 font-semibold text-white bg-purple-600 rounded hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50">
+          <span v-if="generatingSwing">Generating...</span>
+          <span v-else>Swing Plan</span>
+        </button>
+        <div class="relative" ref="swingDropdownContainer">
+          <button @click="toggleSwingDropdown" class="px-4 py-2 font-semibold text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200">
+            Select Swing Plan
+            <svg class="inline-block w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          <ul v-if="isSwingDropdownOpen" class="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+            <li v-if="swingHistory.length === 0">
+              <a class="block px-4 py-2 text-sm text-gray-500">No swing plans available</a>
+            </li>
+            <li v-for="item in swingHistory" :key="item.id">
+              <a @click="selectSwing(item)" href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">{{ item.symbol || symbol }} - {{ formatDate(item.created_at) }}</a>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
     <!-- Rendered markdown report (used for both research and technical) -->
@@ -46,6 +66,7 @@
 <script>
 import axios from 'axios';
 import MarkdownIt from 'markdown-it';
+import markdownItAnchor from 'markdown-it-anchor';
 
 export default {
   name: 'StockResearch',
@@ -66,15 +87,31 @@ export default {
       selectedReport: null,
       technicalHistory: [],
       isTechDropdownOpen: false,
-      md: null
+      swingHistory: [],
+      isSwingDropdownOpen: false,
+      generatingResearch: false,
+      generatingSwing: false,
+      md: null,
     };
   },
   computed: {
     renderedReport() {
-      if (this.md && this.selectedReport) {
-        return this.md.render(this.selectedReport);
+      if (!this.md || !this.selectedReport) return '';
+      const report = this.selectedReport;
+      // Detect report type (add a 'type' field in your API if possible)
+      if (report.type === 'stock') {
+        // Research report
+        return this.md.render(this.renderResearchReport(report));
+      } else if (report.type === 'swing') {
+        // Swing report
+        return this.md.render(this.renderSwingReport(report));
+      } else if (report.type === 'technical') {
+        // Technical report (example, adjust as needed)
+        return this.md.render(this.renderTechnicalReport(report));
+      } else {
+        // Fallback: render as JSON
+        return this.md.render('```\n' + JSON.stringify(report, null, 2) + '\n```');
       }
-      return '';
     }
   },
   watch: {
@@ -101,6 +138,106 @@ export default {
     }
   },
   methods: {
+    renderResearchReport(report) {
+      let mdText = `# ${report.symbol || ''} Research Report\n\n`;
+      mdText += `**Date:** ${report.created_at || ''}\n\n`;
+      let toc = '## Table of Contents\n';
+      toc += '- [Recommendation](#recommendation)\n';
+      toc += '- [Technical Analysis](#technical-analysis)\n';
+      toc += '- [Dividends](#dividends)\n';
+      toc += '- [Market Analysis](#market-analysis)\n';
+      toc += '- [News Analysis](#news-analysis)\n';
+      mdText += toc + '\n';
+      mdText += `## Recommendation\n${report.recommendation || 'No recommendation available.'}\n\n`;
+      mdText += `## Technical Analysis\n${report.technical || 'No technical analysis available.'}\n\n`;
+      mdText += `## Dividends\n${report.dividend || 'No dividend information available.'}\n\n`;
+      mdText += `## Market Analysis\n${report.market || 'No market analysis available.'}\n\n`;
+      mdText += `## News Analysis\n${report.news || 'No news analysis available.'}\n\n`;
+      return mdText;
+    },
+
+    renderSwingReport(report) {
+      let mdText = `# ${report.symbol || ''} Swing Trade Plan\n\n`;
+      mdText += `**Date:** ${report.created_at || ''}\n\n`;
+      let toc = '## Table of Contents\n';
+      toc += '- [Pattern Analysis](#pattern-analysis)\n';
+      toc += '- [Trade Recommendation](#trade-recommendation)\n';
+      toc += '- [Trade Plan](#trade-plan)\n';
+      mdText += toc + '\n';
+      mdText += `## Pattern Analysis\n${report.pattern_analysis || 'No pattern analysis.'}\n\n`;
+      mdText += `## Trade Recommendation\n${report.trade_recommendation || 'No recommendation.'}\n\n`;
+      if (report.swing_trade_plan) {
+        const plan = report.swing_trade_plan;
+        mdText += `## Trade Plan\n`;
+        mdText += `- **Direction:** ${plan.direction || ''}\n`;
+        mdText += `- **Entry Price:** ${plan.entry_price || ''}\n`;
+        mdText += `- **Stop Loss:** ${plan.stop_loss_price || ''}\n`;
+        mdText += `- **Take Profit:** ${plan.take_profit_price || ''}\n`;
+        mdText += `- **Risk per Trade (USD):** ${plan.risk_per_trade_usd || ''}\n`;
+        mdText += `- **Position Size:** ${plan.position_size || ''}\n`;
+        mdText += `- **Risk/Reward Ratio:** ${plan.risk_reward_ratio || ''}\n`;
+        mdText += `- **Entry Reason:** ${plan.entry_reason || ''}\n`;
+        mdText += `- **Exit Reason:** ${plan.exit_reason || ''}\n`;
+      } else {
+        mdText += `## Trade Plan\nNo trade plan available.\n`;
+      }
+      return mdText;
+    },
+
+    renderTechnicalReport(report) {
+      let mdText = `# ${report.symbol || ''} Technical Analysis\n\n`;
+      mdText += `**Date:** ${report.created_at || ''}\n\n`;
+      mdText += `## Technical Summary\n${report.technical || 'No technical summary.'}\n\n`;
+      if (report.structured_output) {
+        mdText += '### Indicators\n';
+        Object.entries(report.structured_output).forEach(([key, value]) => {
+          mdText += `- **${key}:** ${value}\n`;
+        });
+      }
+      return mdText;
+    },
+    toggleSwingDropdown() {
+      this.isSwingDropdownOpen = !this.isSwingDropdownOpen;
+    },
+    closeSwingDropdown() {
+      this.isSwingDropdownOpen = false;
+    },
+    async generateSwing() {
+      this.generatingSwing = true;
+      try {
+        this.closeSwingDropdown();
+        console.log(`Generating swing plan for ${this.symbol}...`);
+        const response = await axios.get(`/api/stock/${this.symbol}/swing/generate`);
+        console.log('Swing plan generated:', response.data);
+        await this.fetchSwingHistory();
+      } catch (error) {
+        console.error('Error generating swing plan:', error);
+      }
+      this.generatingSwing = false;
+    },
+    async fetchSwingHistory() {
+      try {
+        console.log(`Fetching swing plan history for ${this.symbol}...`);
+        const response = await axios.get(`/api/stock/${this.symbol}/swing`);
+        this.swingHistory = response.data.data;
+        console.log('Swing history:', this.swingHistory);
+      } catch (error) {
+        console.error('Error fetching swing plan history:', error);
+      }
+    },
+    async selectSwing(item) {
+      try {
+        console.log('Selected swing item:', item);
+        const response = await axios.get(`/api/swing/${item.id}`);
+        this.selectedReport = response.data.data;
+        console.log('Fetched swing report:', this.selectedReport);
+        this.closeSwingDropdown();
+        this.$emit('swing-selected', item);
+      } catch (error) {
+        console.error('Error fetching swing report:', error);
+        this.selectedReport = '### Error loading swing report. Please try again.';
+      }
+    },
     toggleDropdown() {
       this.isDropdownOpen = !this.isDropdownOpen;
     },
@@ -114,6 +251,7 @@ export default {
       this.isTechDropdownOpen = false;
     },
     async generateResearch() {
+      this.generatingResearch = true;
       try {
         this.closeDropdown();
         console.log(`Generating research for ${this.symbol}...`);
@@ -123,12 +261,13 @@ export default {
       } catch (error) {
         console.error('Error generating research:', error);
       }
+      this.generatingResearch = false;
     },
     async generateTechnical() {
       try {
         this.closeTechDropdown();
         console.log(`Generating technical analysis for ${this.symbol}...`);
-        const response = await axios.get(`/api/technical/generate/${this.symbol}`);
+        const response = await axios.get(`/api/stock/${this.symbol}/technical/generate`);
         console.log('Technical analysis generated:', response.data);
         await this.fetchTechnicalHistory();
       } catch (error) {
@@ -170,7 +309,7 @@ export default {
     async selectResearch(item) {
       try {
         console.log('Selected research item:', item);
-        const response = await axios.get(`/api/stock/research/${item.id}`);
+        const response = await axios.get(`/api/research/${item.id}`);
         this.selectedReport = response.data.data;
         console.log('Fetched report:', this.selectedReport);
         this.closeDropdown();
@@ -183,7 +322,7 @@ export default {
     async selectTechnical(item) {
       try {
         console.log('Selected technical item:', item);
-        const response = await axios.get(`/api/stock/technical/${item.id}`);
+        const response = await axios.get(`/api/technical/${item.id}`);
         this.selectedReport = response.data.data;
         console.log('Fetched technical report:', this.selectedReport);
         this.closeTechDropdown();
@@ -204,14 +343,23 @@ export default {
       if (this.$refs.techDropdownContainer && !this.$refs.techDropdownContainer.contains(event.target)) {
         this.closeTechDropdown();
       }
+      if (this.$refs.swingDropdownContainer && !this.$refs.swingDropdownContainer.contains(event.target)) {
+        this.closeSwingDropdown();
+      }
     }
   },
   created() {
     this.md = new MarkdownIt();
+    this.md.use(markdownItAnchor, {
+      slugify: s => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    });
   },
   mounted() {
-    this.fetchResearchHistory();
-    this.fetchTechnicalHistory();
+    if (this.symbol) {
+      this.fetchResearchHistory();
+      this.fetchTechnicalHistory();
+      this.fetchSwingHistory();
+    }
     document.addEventListener('click', this.handleClickOutside);
   },
   beforeUnmount() {

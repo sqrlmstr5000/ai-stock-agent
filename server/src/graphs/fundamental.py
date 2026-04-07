@@ -3,50 +3,61 @@ from typing import Dict, List
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Annotated
 from typing_extensions import TypedDict
+import operator
 from langchain_core.prompts import PromptTemplate
 from langgraph.graph import StateGraph, START, END
 from langchain_core.runnables import Runnable
 from langgraph.graph.message import add_messages
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from server.src.utils.logging import setup_logger
+from utils.langchain_handler import VerboseFileCallbackHandler
+from utils.logging import setup_logger
+logger = setup_logger(__name__)
 from providers.yfinance import YFinanceProvider
 from providers.alphavantage import AlphaVantageProvider
 from models.marketdata import HistoricalTrackedValues
 from utils.prompts import system_message
-from server.src.graphs.technical import TechnicalAnalysisGraph
+from utils.common import merge_dict_results, take_latest_value
+from graphs.technical import TechnicalAnalysisGraph
 
 class State(TypedDict):
     # Messages have the type "list". The `add_messages` function
     # in the annotation defines how this state key should be updated
     # (in this case, it appends messages to the list, rather than overwriting them)
     messages: Annotated[list, add_messages]
-    symbol: str
-    llm: ChatGoogleGenerativeAI
-    results: Dict
-    yfinance_provider: YFinanceProvider
-    alphavantage_provider: AlphaVantageProvider
-    usage: Dict[str, dict]  # For per-node usage and API tracking
-    period: str  # For technical analysis
+    symbol: Annotated[str, take_latest_value]  # Symbol will use the latest value in concurrent updates
+    # Use our custom merge function for results dict to handle concurrent updates
+    results: Annotated[Dict, merge_dict_results]
+    # Also use our custom merge function for usage dict
+    usage: Annotated[Dict[str, dict], merge_dict_results]  # For per-node usage and API tracking
+    period: Annotated[str, take_latest_value]  # For technical analysis - will use latest value
 
 class FundamentalGraph:
-    def __init__(self, llm,):
-        self.logger = setup_logger(self.__class__.__name__)
+    def __init__(self, llm: ChatGoogleGenerativeAI, yfinance_provider: YFinanceProvider, alphavantage_provider: AlphaVantageProvider):
+        # Use module-level logger
         self.llm = llm
-        self.technical_graph = TechnicalAnalysisGraph(llm)
+        self.handler = VerboseFileCallbackHandler(graph_name=self.__class__.__name__)
+        self.technical_graph = TechnicalAnalysisGraph(llm=llm, yfinance_provider=yfinance_provider, alphavantage_provider=alphavantage_provider)
+        self.yfinance_provider = yfinance_provider
+        self.alphavantage_provider = alphavantage_provider
         self.graph = self.create_analysis_graph()
 
     # Market Analysis Node (without dividend analysis)
+
     async def market_analysis(self, state: State) -> State:
         """Node for market analysis (excluding dividend analysis)"""
         symbol = state["symbol"]
-        self.logger.info(f"Starting market analysis for {symbol}...")
-        llm = state["llm"]
-        alphavantage_provider = state["alphavantage_provider"]
+        logger.info(f"Starting market analysis for {symbol}...")
+        llm = self.llm
+        alphavantage_provider = self.alphavantage_provider
 
-        data, market_request_count = alphavantage_provider.get_market_data()
-        earnings_history, earnings_request_count = alphavantage_provider.get_earnings_history()
+        data, market_request_count = alphavantage_provider.get_market_data(symbol)
+        earnings_history, earnings_request_count = alphavantage_provider.get_earnings_history(symbol)
 
+        if data is None:
+            logger.error(f"No market data available for {symbol}. Stopping graph execution.")
+            raise RuntimeError(f"No market data available for {symbol}. Stopping graph execution.")
+        
         prompt = PromptTemplate.from_template(
             """Analyze the market context for {symbol}:
 
@@ -90,8 +101,10 @@ class FundamentalGraph:
             "earnings": json.dumps(earnings_history.model_dump(), indent=2)})
 
         state["results"]["market"] = {
-            "data": data.model_dump(),
-            "earnings": earnings_history.model_dump(),
+            "data": {
+                "market": data.model_dump(),
+                "earnings": earnings_history.model_dump(),
+            },
             "analysis": analysis.content
         }
         # Store usage metadata and api usage in state["usage"]
@@ -103,14 +116,15 @@ class FundamentalGraph:
         return state
 
     # Dividend Analysis Node
+
     async def dividend_analysis(self, state: State) -> State:
         """Node for dividend analysis"""
         symbol = state["symbol"]
-        self.logger.info(f"Starting dividend analysis for {symbol}...")
-        llm = state["llm"]
-        yfinance_provider = state["yfinance_provider"]
+        logger.info(f"Starting dividend analysis for {symbol}...")
+        llm = self.llm
+        yfinance_provider = self.yfinance_provider
 
-        dividend_history = yfinance_provider.get_dividend_history()
+        dividend_history = yfinance_provider.get_dividend_history(symbol)
 
         prompt = PromptTemplate.from_template(
             """Analyze the dividend history for {symbol}:
@@ -133,7 +147,7 @@ class FundamentalGraph:
         })
 
         state["results"]["dividend"] = {
-            "dividends": dividend_history.model_dump(),
+            "data": dividend_history.model_dump(),
             "analysis": analysis.content
         }
         state["usage"]["dividend_analysis"] = {
@@ -143,24 +157,28 @@ class FundamentalGraph:
         return state
 
     # News Analysis Node
+
     async def news_analysis(self, state: State) -> State:
         """Node for news analysis"""
         symbol = state["symbol"]
-        self.logger.info(f"Fetching news for {symbol}...")
-        llm = state["llm"]
-        provider = state["yfinance_provider"]
+        logger.info(f"Fetching news for {symbol}...")
+        llm = self.llm
+        provider = self.yfinance_provider
 
-        news_data = provider.get_news()
+        news_data = provider.get_news(symbol)
 
         prompt = PromptTemplate.from_template(
             """Analyze these recent news items for {symbol}:
             {news}
 
-            Provide:
+            Provide a report including:
             1. Overall sentiment
             2. Key developments
-            3. Potential impact
-            4. Risk factors
+            3. Potential impact 
+                a. Positive Catalysts: Upcoming earnings beats, product launches, or favorable macroeconomic shifts (e.g., interest rate cuts).
+                b. Volume Expansion: Identifying if big institutional buyers are entering the stock.
+            4. Risk factors inc as
+                a. Macro Headwinds: Analyzing sector-wide weakness or geopolitical risks that could override individual stock strength.
             5. Sentiment Score (0-100, where 100 is very positive)
             """
         )
@@ -178,12 +196,99 @@ class FundamentalGraph:
         }
         return state
 
+    # Validate Section Node
+    async def validate_section(self, state: State, section: str) -> State:
+        """Reusable node to validate a specific section against its raw data."""
+        symbol = state["symbol"]
+        logger.info(f"Validating {section} section for {symbol}...")
+        llm = self.llm
+        results = state["results"]
+
+        prompt = PromptTemplate.from_template(
+            """You are a senior financial analyst and fact-checker. Your task is to meticulously review a research report section and the raw data it was based on to ensure 100% accuracy.
+
+            **Section to validate:** {section_text}
+
+            **Raw API data:** {raw_data}
+
+            Instructions:
+            1. Carefully compare every numerical value and key statement in the section against the raw data.
+            2. Identify and list any and all inconsistencies, factual errors, misinterpretations or assumptions not supported by the raw data.
+            3. For each error found, state the incorrect information from the report and the correct information from the raw data.
+            4. If the section is completely accurate, state "No errors found."
+            5. Format your output as a bulleted list of findings.
+                **Example Output:**
+                - **Error:** Report states "Net income was $50 million."
+                - **Correction:** Raw data shows "Net income was $45 million."
+            """
+        )
+
+        section_text = results.get(section, {}).get("analysis", "")
+        raw_data = results.get(section, {}).get("data", "")
+
+        chain = prompt | llm
+        validation = await chain.ainvoke({
+            "section_text": section_text,
+            "raw_data": raw_data
+        })
+
+        # Store the validation result under a section-specific key
+        state["results"][f"validate_{section}"] = validation.content
+        state["usage"][f"validate_{section}"] = {
+            "token_usage": getattr(validation, "usage_metadata", None),
+            "api_usage": None
+        }
+        return state
+
+    async def revise_section(self, state: State, section: str) -> State:
+        """Reusable node to revise a specific section based on fact-checker corrections."""
+        symbol = state["symbol"]
+        logger.info(f"Revising {section} section for {symbol} based on fact-checker corrections...")
+        llm = self.llm
+        results = state["results"]
+
+        prompt = PromptTemplate.from_template(
+            """You are a financial writer and editor. Your task is to revise a research report section based on a list of specific corrections.
+           
+            Instructions:
+                1. Read the **corrections from the fact-checker** carefully.
+                2. Directly apply each correction to the **original section**.
+                3. Do not add new information or remove accurate information.
+                4. Ensure the final revised section is a coherent and well-written document.
+                5. Provide the final, corrected section as your output. If no corrections are needed, provide the original section unchanged.
+                6. Do not include the Original Section in the output. Only the revised report section with revisions incorporated.
+            
+            **Corrections from Fact-Checker:** {validation_notes}
+
+            **Original Section:** {original_section}
+            """
+        )
+
+        original_section = results.get(section, {}).get("analysis", "")
+        validation_notes = results.get(f"validate_{section}", "")
+
+        chain = prompt | llm
+        revised_section = await chain.ainvoke({
+            "original_section": original_section,
+            "validation_notes": validation_notes
+        })
+
+        state["results"][f"revised_{section}"] = {
+            "analysis": revised_section.content,
+        }
+        state["usage"][f"revised_{section}"] = {
+            "token_usage": getattr(revised_section, "usage_metadata", None),
+            "api_usage": None
+        }
+        return state
+
     # Final Recommendation Node
+
     async def generate_recommendation(self, state: State) -> State:
         """Node for final recommendation"""
         symbol = state["symbol"]
-        self.logger.info(f"Generating final recommendation for {symbol}...")
-        llm = state["llm"]
+        logger.info(f"Generating final recommendation for {symbol}...")
+        llm = self.llm
         results = state["results"]
 
         prompt = PromptTemplate.from_template(
@@ -203,20 +308,35 @@ class FundamentalGraph:
 
             Provide:
             1. Final recommendation (Strong Buy/Buy/Hold/Sell/Strong Sell)
+            2. One year target price range including: low price target, high price target, percent gain from current to high price target
             3. Confidence score (1-10)
-            4. Key reasons
-            5. Risk factors
-            6. Target price range including: low price target, high price target, percent gain from current to high price target
+            4. Write a bull case theory focused on momentum and catalysts. Look for reasons why the price will move significantly higher over the next few weeks to months. Consider the following factors:
+                Trend Confirmation: Looking for "Higher Highs" and "Higher Lows" on daily/weekly charts.
+                Positive Catalysts: Upcoming earnings beats, product launches, or favorable macroeconomic shifts (e.g., interest rate cuts).
+                Volume Expansion: Identifying if big institutional buyers are entering the stock.
+                Mean Reversion: Checking if the stock is "oversold" on the RSI but showing a hidden bullish divergence.
+            5. Write a bear case theory focused on risks and potential pitfalls. Look for the "Hidden Trap" that could cause the trade to fail. Consider the following factors:
+                Resistance Levels: Identifying "heavy" supply zones where sellers historically take control.
+                Macro Headwinds: Analyzing sector-wide weakness or geopolitical risks that could override individual stock strength.
+                Valuation Fatigue: Flagging if a stock is trading at historical extremes (e.g., an unsustainably high P/E ratio).
+                Technical Breakdowns: Looking for "Head and Shoulders" patterns or momentum exhaustion (RSI overbought).
             """
         )
+
+        def get_section(section_name, default=None):
+            # Prefer revised_{section} if available, else fall back to original analysis
+            revised = results.get(f"revised_{section_name}")
+            if revised:
+                return revised
+            return results.get(section_name, {}).get("analysis", default)
 
         chain = prompt | llm
         final_recommendation = await chain.ainvoke({
             "symbol": symbol,
-            "technical": results["technical"]["analysis"],
-            "market": results["market"]["analysis"],
-            "dividend": results["dividend"]["analysis"],
-            "news": results["news"]["analysis"]
+            "technical": get_section("technical", ""),
+            "market": get_section("market", ""),
+            "dividend": get_section("dividend", ""),
+            "news": get_section("news", "")
         })
 
         state["results"]["recommendation"] = final_recommendation.content
@@ -226,16 +346,20 @@ class FundamentalGraph:
         }
         return state
 
+
     async def export_analysis(self, state: dict) -> dict:
         """Node for exporting the analysis to a structured format. Accepts output_type as a parameter."""
         symbol = state["symbol"]
-        if self.logger:
-            self.logger.info(f"Exporting analysis for {symbol}...")
-        llm = state["llm"]
+        logger.info(f"Exporting analysis for {symbol}...")
+        llm = self.llm
         results = state["results"]
+
 
         prompt = PromptTemplate.from_template(
             """Based on the following analysis for {symbol}, extract the required information.
+
+            Technical Analysis:
+            {technical}
 
             Market Analysis:
             {market}
@@ -247,22 +371,29 @@ class FundamentalGraph:
             {recommendation}
 
             Extract the information and populate the structured output object.
-            Set the report_date to today's date.
             """
         )
+
+        def get_section(section_name, default=None):
+            # Prefer revised_{section} if available, else fall back to original analysis
+            revised = results.get(f"revised_{section_name}")
+            if revised:
+                return revised
+            return results.get(section_name, {}).get("analysis", default)
 
         chain = prompt | llm.with_structured_output(HistoricalTrackedValues)
 
         structured_data = await chain.ainvoke({
             "symbol": symbol,
-            "market": results["market"]["analysis"],
-            "news": results["news"]["analysis"],
-            "recommendation": results["recommendation"]
+            "technical": get_section("technical", ""),
+            "market": get_section("market", ""),
+            "news": get_section("news", ""),
+            "recommendation": results.get("recommendation", "")
         })
 
         state["results"]["structured_data"] = structured_data.model_dump()
         state["usage"]["export_analysis"] = {
-            "token_usage": None,
+            "token_usage": None, # usage_metadata is not available when using llm.with_structured_output
             "api_usage": None
         }
         return state
@@ -270,30 +401,86 @@ class FundamentalGraph:
     def create_analysis_graph(self) -> Runnable:
         """Create the analysis workflow graph with technical analysis node included."""
         graph = StateGraph(State)
-
         graph.add_node("technical", self.technical_graph.technical_analysis)
         graph.add_node("market", self.market_analysis)
         graph.add_node("dividend", self.dividend_analysis)
         graph.add_node("news", self.news_analysis)
+        # Add per-section validation nodes using async functions
+        async def validate_technical(state):
+            return await self.validate_section(state, "technical")
+        async def validate_market(state):
+            return await self.validate_section(state, "market")
+        async def validate_dividend(state):
+            return await self.validate_section(state, "dividend")
+        async def validate_news(state):
+            return await self.validate_section(state, "news")
+
+        graph.add_node("validate_technical", validate_technical)
+        graph.add_node("validate_market", validate_market)
+        graph.add_node("validate_dividend", validate_dividend)
+        graph.add_node("validate_news", validate_news)
+
+        # Add per-section revise nodes using async functions
+        async def revise_technical(state):
+            return await self.revise_section(state, "technical")
+        async def revise_market(state):
+            return await self.revise_section(state, "market")
+        async def revise_dividend(state):
+            return await self.revise_section(state, "dividend")
+        async def revise_news(state):
+            return await self.revise_section(state, "news")
+
+        graph.add_node("revise_technical", revise_technical)
+        graph.add_node("revise_market", revise_market)
+        graph.add_node("revise_dividend", revise_dividend)
+        graph.add_node("revise_news", revise_news)
         graph.add_node("recommendation", self.generate_recommendation)
         graph.add_node("export_analysis", self.export_analysis)
 
-        # Define edges
+        # Define edges for the sequential first part of the analysis
         graph.add_edge(START, "technical")
         graph.add_edge("technical", "market")
         graph.add_edge("market", "dividend")
         graph.add_edge("dividend", "news")
-        graph.add_edge("news", "recommendation")
+
+        # Fan out from news to validation nodes (parallelization)
+        graph.add_edge("news", "validate_technical")
+        graph.add_edge("news", "validate_market")
+        graph.add_edge("news", "validate_dividend")
+        graph.add_edge("news", "validate_news")
+        
+        # Connect each validation node to its corresponding revision node
+        graph.add_edge("validate_technical", "revise_technical")
+        graph.add_edge("validate_market", "revise_market")
+        graph.add_edge("validate_dividend", "revise_dividend")
+        graph.add_edge("validate_news", "revise_news")
+        
+        # Add a join node to wait for all revisions before proceeding
+        async def join_revisions(state):
+            # Only proceed if all revised sections are present
+            required = ["technical", "market", "dividend", "news"]
+            if all(f"revised_{section}" in state["results"] for section in required):
+                logger.info(f"All {len(required)} sections validated and revised. Proceeding to recommendation.")
+                return state
+            # Count how many are done
+            completed = sum(1 for section in required if f"revised_{section}" in state["results"])
+            logger.info(f"Waiting for all sections to be revised. Progress: {completed}/{len(required)}")
+            # Otherwise, do nothing (graph will wait)
+            return None
+
+        graph.add_node("join_revisions", join_revisions)
+        graph.add_edge("revise_technical", "join_revisions")
+        graph.add_edge("revise_market", "join_revisions")
+        graph.add_edge("revise_dividend", "join_revisions")
+        graph.add_edge("revise_news", "join_revisions")
+        graph.add_edge("join_revisions", "recommendation")
         graph.add_edge("recommendation", "export_analysis")
         graph.add_edge("export_analysis", END)
         return graph.compile()
 
     async def analyze_stock(self, symbol: str) -> Dict:
         """Run complete stock analysis"""
-        self.logger.info(f"Analyzing {symbol}...")
-
-        yfinance_provider = YFinanceProvider(symbol)
-        alphavantage_provider = AlphaVantageProvider(symbol)
+        logger.info(f"Analyzing {symbol}...")
 
         # Initialize state
         init_state: State = {
@@ -301,16 +488,13 @@ class FundamentalGraph:
                 {"role": "system", "content": system_message}
             ],
             "symbol": symbol,
-            "llm": self.llm,
             "results": {},
-            "yfinance_provider": yfinance_provider,
-            "alphavantage_provider": alphavantage_provider,
             "usage": {},  # Explicitly initialize usage dict
             "period": "1y"  # Set period to 1y for technical analysis
         }
 
         # Run analysis
-        final_state = await self.graph.ainvoke(init_state)
+        final_state = await self.graph.ainvoke(init_state, config={"callbacks": [self.handler]})
         return {
             "results": final_state["results"],
             "usage": final_state.get("usage", {})
@@ -337,17 +521,17 @@ class FundamentalGraph:
         today = datetime.now().strftime("%m-%d-%Y")
         ext = "md" if report_type == 'str' else 'json'
         filename = f"output/OUTPUT-{file_basename}-{today}.{ext}"
-        self.logger.debug(f"Report contents: {data}")
+        logger.debug(f"Report contents: {data}")
         with open(filename, 'w') as f:
             if report_type == 'str':
                 f.write(data)
             else:
                 json.dump(data, f, indent=2, default=str)
-        self.logger.info(f"Report saved to {filename}")
+        logger.info(f"Report saved to {filename}")
 
     async def compare_stocks(self, symbols: List[str]) -> Dict:
         """Compare multiple stocks and recommend the best one"""
-        self.logger.info(f"Comparing {', '.join(symbols)}...")
+        logger.info(f"Comparing {', '.join(symbols)}...")
         analyses = {}
         for symbol in symbols:
             results = await self.analyze_stock(symbol)

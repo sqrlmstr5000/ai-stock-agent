@@ -1,10 +1,14 @@
 # Use an official Python base image
 FROM python:3.12-slim
 
-# Install Node.js and npm
+# Install Node.js, npm, and PostgreSQL 16 client
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt/ $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y postgresql-client-16 \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \
@@ -15,6 +19,7 @@ WORKDIR /app
 
 # Create config directory
 RUN mkdir -p /config
+RUN mkdir -p /output
 
 # Copy Python requirements and install dependencies
 COPY requirements.txt .
@@ -34,7 +39,7 @@ ENV PYTHONPATH=/app
 # Create a shell script to run both servers
 RUN echo '#!/bin/bash\n\
 cd /app/client && npm run dev & \n\
-cd /app/server/src && uvicorn main:app --reload --host 0.0.0.0 --port 8000\n\
+cd /app/server/src && uvicorn main:app --reload --reload-exclude "services/migrations/*.py" --host 0.0.0.0 --port 8000\n\
 wait' > /app/start-dev.sh
 
 RUN chmod +x /app/start-dev.sh

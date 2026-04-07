@@ -8,3 +8,7 @@ pydantic>=2.4.2
 peewee>=3.17.0
 playhouse>=0.1.0
 apscheduler
+psycopg2-binary
+aiohttp
+edgartools
+python-dotenv

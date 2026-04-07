@@ -4,11 +4,20 @@ from datetime import date
 
 class TechnicalIndicators(BaseModel):
     current_price: float
+    current_volume: int
     sma_20: float
     sma_50: float
     sma_200: float
     rsi: float
     volume_trend: float
+    macd: float
+    macd_signal: float
+    macd_hist: float
+    bb_upper: float
+    bb_middle: float
+    bb_lower: float
+    obv: float
+    atr: float
     ohlcv: Dict[str, Dict[str, str]]
 
 class DividendHistory(BaseModel):
@@ -53,22 +62,33 @@ class Earning(BaseModel):
     gross_profit_margin: Optional[float] = None
     operating_cash_flow: Optional[float] = None
     free_cash_flow: Optional[float] = None
+    market_cap: Optional[int] = None
+    beta: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    trailing_eps: Optional[float] = None
+    forward_pe: Optional[float] = None
+    peg_ratio: Optional[float] = None
+    price_to_book: Optional[float] = None
+    price_to_sales: Optional[float] = None
+    profit_margin: Optional[float] = None
+    operating_margin: Optional[float] = None
+    return_on_assets: Optional[float] = None
+    return_on_equity: Optional[float] = None
+    revenue_per_share: Optional[float] = None
 
 class EarningsHistory(BaseModel):
     quarterly_earnings: List[Earning]
     annual_earnings: List[Earning]
 
 class MarketData(BaseModel):
-    sector: str
-    industry: str
+    sector: Optional[str] = None
+    industry: Optional[str] = None
     market_cap: int
-    beta: float
+    beta: Optional[float] = None
     pe_ratio: float
-    dividend_yield: float
-    divident_rate: Optional[float] = None
     trailing_eps: float
-    forward_pe: float
-    peg_ratio: float
+    forward_pe: Optional[float] = None
+    peg_ratio: Optional[float] = None
     price_to_book: float
     price_to_sales: float
     profit_margin: float
@@ -92,7 +112,6 @@ class HistoricalTrackedValues(BaseModel):
     values to track over time for a specific stock.
     This model is designed for historical data storage and trend analysis.
     """
-    report_date: date = Field(..., description="The date for which these values are recorded (e.g., end of month)")
     ticker: str = Field(..., description="Stock ticker symbol (e.g., AAPL)")
 
     final_recommendation: str = Field(..., description="Final Recommendation (e.g., Strong Buy, Buy, Sell, Strong Sell, Hold)")
@@ -118,6 +137,7 @@ class HistoricalTrackedValues(BaseModel):
     #guidance_summary: Optional[str] = Field(None, description="Summary of management's forward-looking guidance from the most recent report")
 
     # --- Price Targets ---
+    current_price: Optional[float] = Field(None, description="Current price from technical analysis")
     low_price_target: Optional[float] = Field(None, description="Low price target from analysis")
     high_price_target: Optional[float] = Field(None, description="High price target from analysis")
     price_target_percent: Optional[float] = Field(None, description="Percent gain from current to high price target in analysis")
@@ -130,3 +150,33 @@ class TechnicalHistoricalTrackedValues(BaseModel):
     sma_50: Optional[float] = Field(None, description="50-day Simple Moving Average")
     sma_200: Optional[float] = Field(None, description="200-day Simple Moving Average")
     rsi: Optional[float] = Field(None, description="Relative Strength Index (0-100)")
+
+class SwingTradePlan(BaseModel):
+    """
+    A Pydantic model representing a complete swing trade plan, ready for execution.
+    """
+
+    ticker: str = Field(..., description="The stock ticker symbol (e.g., 'AAPL').")
+    direction: str = Field(..., description="The trade direction: 'long' or 'short'.")
+    entry_price: float = Field(..., gt=0, description="The price at which to enter the trade.")
+    stop_loss_price: float = Field(..., gt=0, description="The price to exit the trade to limit losses.")
+    take_profit_price: float = Field(..., gt=0, description="The price at which to exit the trade to lock in profits.")
+
+    # Risk Management
+    risk_per_trade_usd: float = Field(..., gt=0, description="The maximum amount of capital to risk on this trade.")
+    position_size: int = Field(..., ge=0, description="The number of shares to buy/sell.")
+    risk_reward_ratio: float = Field(..., gt=0, description="The calculated risk/reward ratio for the trade.")
+    
+    # Rationale and Execution Plan
+    entry_reason: str = Field(..., description="A brief explanation for the entry signal (e.g., 'Breakout of Bull Flag on high volume').")
+    exit_reason: str = Field(..., description="A brief explanation of the exit strategy (e.g., 'Target based on pattern measurement, Stop Loss below key support').")
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Add a simple validation to ensure stop_loss_price and take_profit_price are logical
+        if self.direction == 'long':
+            if not (self.stop_loss_price < self.entry_price < self.take_profit_price):
+                raise ValueError("For a long trade, Stop Loss must be below Entry, and Take Profit above Entry.")
+        elif self.direction == 'short':
+            if not (self.stop_loss_price > self.entry_price > self.take_profit_price):
+                raise ValueError("For a short trade, Stop Loss must be above Entry, and Take Profit below Entry.")

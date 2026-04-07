@@ -1,0 +1,78 @@
+
+{
+  "status": "OK",
+  "request_id": "7cc69ed9ff0f445087fbcd8bcda84079",
+  "results": [
+    {
+      "settlement_date": "2025-07-31",
+      "ticker": "NVDA",
+      "short_interest": 192121364,
+      "avg_daily_volume": 156238095,
+      "days_to_cover": 1.23
+    },
+    {
+      "settlement_date": "2025-07-15",
+      "ticker": "NVDA",
+      "short_interest": 201664565,
+      "avg_daily_volume": 170825226,
+      "days_to_cover": 1.18
+    },
+    {
+      "settlement_date": "2025-06-30",
+      "ticker": "NVDA",
+      "short_interest": 243029014,
+      "avg_daily_volume": 198579947,
+      "days_to_cover": 1.22
+    },
+    {
+      "settlement_date": "2025-06-13",
+      "ticker": "NVDA",
+      "short_interest": 206798022,
+      "avg_daily_volume": 182114203,
+      "days_to_cover": 1.14
+    },
+    {
+      "settlement_date": "2025-05-30",
+      "ticker": "NVDA",
+      "short_interest": 229342403,
+      "avg_daily_volume": 242510788,
+      "days_to_cover": 1
+    },
+    {
+      "settlement_date": "2025-05-15",
+      "ticker": "NVDA",
+      "short_interest": 243993623,
+      "avg_daily_volume": 209670213,
+      "days_to_cover": 1.16
+    },
+    {
+      "settlement_date": "2025-04-30",
+      "ticker": "NVDA",
+      "short_interest": 249766546,
+      "avg_daily_volume": 253395526,
+      "days_to_cover": 1
+    },
+    {
+      "settlement_date": "2025-04-15",
+      "ticker": "NVDA",
+      "short_interest": 262957336,
+      "avg_daily_volume": 384463053,
+      "days_to_cover": 1
+    },
+    {
+      "settlement_date": "2025-03-31",
+      "ticker": "NVDA",
+      "short_interest": 234404715,
+      "avg_daily_volume": 253171367,
+      "days_to_cover": 1
+    },
+    {
+      "settlement_date": "2025-03-14",
+      "ticker": "NVDA",
+      "short_interest": 258072746,
+      "avg_daily_volume": 335729552,
+      "days_to_cover": 1
+    }
+  ],
+  "next_url": "https://api.polygon.io/stocks/v1/short-interest?cursor=ARINBE5WREECAAABAAEKAAIBDQoyMDI1LTAzLTE0AQ0ETlZEQQ=="
+}

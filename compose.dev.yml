@@ -1,3 +1,6 @@
+networks:
+   ha_ha:
+     external: true
 version: '3.8'
 services:
   sa:
@@ -13,15 +16,30 @@ services:
       - VITE_API_URL=http://192.168.0.137:8066
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      - POLYGON_API_KEY=${POLYGON_API_KEY}
       - FRED_API_KEY=${FRED_API_KEY}
-      - DEBUG=1  # Enable debug logging
+      - EDGAR_IDENTITY=${EDGAR_IDENTITY}
+      - ALPACA_API_KEY=${ALPACA_API_KEY}
+      - ALPACA_API_SECRET=${ALPACA_API_SECRET}
+      - GOOGLE_APP_EMAIL=${GOOGLE_APP_EMAIL}
+      - GOOGLE_APP_PASSWORD=${GOOGLE_APP_PASSWORD}
+      - DEBUG=${DEBUG}  # Enable debug logging
       - PYTHONUNBUFFERED=1  # Force Python to use unbuffered output
       - PYTHONDONTWRITEBYTECODE=1  # Don't write .pyc files
-
+      - TZ=America/Denver  # Set timezone to MST
+      - POSTGRES_DB=sa
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=P@ssw0rd!
+      - POSTGRES_HOST=pgvector
+      - POSTGRES_PORT=5432
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://192.168.0.137:4318
     volumes:
       - ./client/src:/app/client/src  # Vue.js source code
       - ./server/src:/app/server/src  # FastAPI source code
       - ./client/index.html:/app/client/index.html  # Vue entry point
       - ./client/vite.config.js:/app/client/vite.config.js  # Vite config
       - ./config:/config  # Persistent database storage
+      - ./output:/output  # Output directory
     command: ["/app/start-dev.sh"]
+    networks:
+      - ha_ha

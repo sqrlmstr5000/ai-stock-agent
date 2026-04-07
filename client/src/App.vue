@@ -23,12 +23,6 @@
                 </li>
               </ul>
             </li>
-            <li class="mt-auto">
-              <router-link to="/settings" class="group flex justify-center rounded-md p-3 text-gray-700 hover:text-primary-600 hover:bg-gray-50">
-                <cog-icon class="h-6 w-6 shrink-0 dark:text-gray-300" aria-hidden="true" />
-                <span class="sr-only">Settings</span>
-              </router-link>
-            </li>
           </ul>
         </nav>
       </div>
@@ -128,7 +122,7 @@
 import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import HomeIcon from 'vue-material-design-icons/Home.vue'
-import ChartBarIcon from 'vue-material-design-icons/ChartBar.vue'
+import LibraryIcon from 'vue-material-design-icons/Library.vue'
 import CompareIcon from 'vue-material-design-icons/Compare.vue'
 import StarIcon from 'vue-material-design-icons/Star.vue'
 import InformationIcon from 'vue-material-design-icons/Information.vue'
@@ -137,6 +131,9 @@ import CloseIcon from 'vue-material-design-icons/Close.vue'
 import CogIcon from 'vue-material-design-icons/Cog.vue'
 import MenuIcon from 'vue-material-design-icons/Menu.vue'
 import BriefcaseIcon from 'vue-material-design-icons/Briefcase.vue'
+import ChartBellCurveCumulativeIcon from 'vue-material-design-icons/ChartBellCurveCumulative.vue'
+import ClipboardTextSearchIcon from 'vue-material-design-icons/ClipboardTextSearch.vue'
+import ChartTimelineVariantShimmerIcon from 'vue-material-design-icons/ChartTimelineVariantShimmer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -146,11 +143,10 @@ const searchSymbol = ref('')
 
 const navigation = computed(() => [
   { name: 'Dashboard', href: '/', icon: HomeIcon, current: route.path === '/' },
-  { name: 'Analysis', href: '/analysis', icon: ChartBarIcon, current: route.path.startsWith('/analysis') },
-  { name: 'Compare', href: '/compare', icon: CompareIcon, current: route.path === '/compare' },
+  { name: 'Analysis', href: '/analysis', icon: ClipboardTextSearchIcon, current: route.path.startsWith('/analysis') },
   { name: 'Portfolio', href: '/portfolio', icon: BriefcaseIcon, current: route.path === '/portfolio' },
-  { name: 'Watchlist', href: '/watchlist', icon: StarIcon, current: route.path === '/watchlist' },
-  { name: 'About', href: '/about', icon: InformationIcon, current: route.path === '/about' }
+  { name: 'Swing', href: '/swing', icon: ChartTimelineVariantShimmerIcon, current: route.path === '/swing' },
+  { name: 'Settings', href: '/settings', icon: CogIcon, current: route.path === '/settings' },
 ])
 
 const searchStock = () => {
